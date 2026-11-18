@@ -1,0 +1,22 @@
+<Window x:Class="PulseBattery.App.Views.StartupPrompt"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:PulseBattery.App.Localization"
+        Title="{loc:Text StartupTitle}" Style="{StaticResource {x:Type Window}}" Width="460" SizeToContent="Height"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="NoResize" AllowsTransparency="True" Background="Transparent"
+        PreviewKeyDown="HandleKey">
+    <Border Background="{StaticResource BackgroundBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="14" Padding="25,18,25,25">
+        <StackPanel>
+            <Grid MouseLeftButtonDown="MoveWindow"><TextBlock Text="pulse" Foreground="{StaticResource AccentBrush}" FontSize="19" FontWeight="SemiBold" />
+                <Button Content="×" Click="Dismiss" HorizontalAlignment="Right" Style="{StaticResource QuietButton}" FontSize="20" Padding="8,0" />
+            </Grid>
+            <TextBlock Text="{loc:Text StartupTitle}" FontSize="23" FontWeight="SemiBold" TextWrapping="Wrap" Margin="0,21,12,0" />
+            <TextBlock Text="{loc:Text StartupDescription}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,14,0,0" LineHeight="21" />
+            <TextBlock Text="{loc:Text StartupChoiceHint}" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Margin="0,12,0,0" />
+            <TextBlock Text="{Binding Error}" Foreground="#FFAC99" TextWrapping="Wrap" Margin="0,12,0,0" Visibility="{Binding HasError, Converter={StaticResource BoolVisibility}}" />
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,23,0,0">
+                <Button x:Name="DeclineButton" Content="{loc:Text StartupDecline}" Click="Decline" IsDefault="True" Margin="0,0,9,0" />
+                <Button x:Name="EnableButton" Content="{loc:Text StartupEnable}" Click="Enable" Background="{StaticResource AccentBrush}" Foreground="#172A1D" />
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>
