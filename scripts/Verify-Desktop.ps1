@@ -18,11 +18,12 @@ public static class PulseDesktopChecks {
     [DllImport("user32.dll",CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string c,string n);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h,out Rect r);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
+    [DllImport("user32.dll")] public static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     [DllImport("user32.dll")] private static extern void keybd_event(byte key,byte scan,uint flags,IntPtr extra);
     public static void WinD() { keybd_event(0x5B,0,0,IntPtr.Zero); keybd_event(0x44,0,0,IntPtr.Zero); keybd_event(0x44,0,2,IntPtr.Zero); keybd_event(0x5B,0,2,IntPtr.Zero); }
     public static IntPtr Panel(uint pid,IntPtr bar) {
         IntPtr result=IntPtr.Zero;
-        EnumChildWindows(bar,(h,p)=> { uint id; GetWindowThreadProcessId(h,out id); if(id==pid && IsWindowVisible(h)){ result=h; return false; } return true; },IntPtr.Zero);
+        EnumChildWindows(bar,(h,p)=> { uint id; Rect r; GetWindowThreadProcessId(h,out id); if(id==pid && IsWindowVisible(h) && GetWindowRect(h,out r) && r.Right-r.Left>2 && r.Bottom-r.Top>2){ result=h; return false; } return true; },IntPtr.Zero);
         return result;
     }
     public static int Contrast(Bitmap bitmap,bool light) {
@@ -34,6 +35,7 @@ public static class PulseDesktopChecks {
     }
 }
 '@
+$previousDpi = [PulseDesktopChecks]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $bar = [PulseDesktopChecks]::FindWindow('Shell_TrayWnd', $null)
 if ($bar -eq [IntPtr]::Zero) { throw 'Run this check on the interactive Explorer desktop.' }
 $app = Start-Process -FilePath $AppPath -ArgumentList '--tray' -WindowStyle Hidden -PassThru
@@ -53,7 +55,15 @@ try {
     $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
     $light = (Get-ItemPropertyValue -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize' -Name SystemUsesLightTheme) -ne 0
     $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
-    $baseline = [PulseDesktopChecks]::Contrast($bitmap, $light)
+    $baseline = 0
+    # Collision measurements and the first WPF frame arrive asynchronously.
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        [void][PulseDesktopChecks]::GetWindowRect($panel, [ref]$rect)
+        $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+        $baseline = [PulseDesktopChecks]::Contrast($bitmap, $light)
+        if ([PulseDesktopChecks]::IsWindowVisible($panel) -and $baseline -ge 20) { break }
+        Start-Sleep -Milliseconds 100
+    }
     if ($baseline -lt 20) { throw 'Battery glyphs were not rendered before the check.' }
     $threshold = [Math]::Max(5, [int]($baseline * 0.1))
     function Measure-PanelFrames([string]$label) {
@@ -95,4 +105,5 @@ try {
 }
 finally {
     if (-not $app.HasExited) { $app.Kill(); [void]$app.WaitForExit(5000) }
+    [void][PulseDesktopChecks]::SetThreadDpiAwarenessContext($previousDpi)
 }

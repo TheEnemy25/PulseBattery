@@ -2,9 +2,9 @@ using System.Text.Json;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using System.Windows.Media.Imaging;
 using System.Windows.Automation;
 using System.Windows.Interop;
+using System.Windows.Media.Imaging;
 using PulseBattery.App.Controls;
 using PulseBattery.App.Localization;
 using PulseBattery.App.ViewModels;
@@ -33,158 +33,205 @@ internal static class TaskbarVisibilityChecks
         host.CompositionTarget.BackgroundColor = Colors.Transparent;
         host.CompositionTarget.RenderMode = RenderMode.SoftwareOnly;
         host.RootVisual = panel;
-        await panel.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
-        ArrangePanel(panel);
-        var initiallyShown = model.TaskbarDevices.Count == 2 && model.Devices.All(device => device.ShowOnTaskbar);
-        double X(FrameworkElement element) => element.TranslatePoint(new Point(), panel).X;
-        var pulseOnRight = !model.PulseOnLeft && X(panel.PulseAnchor) >= X(panel.DeviceIndicators) + panel.DeviceIndicators.ActualWidth;
-        var dividersBetweenDevices = VisibleDividers(panel) == 1;
-        model.PulseOnLeft = true; panel.UpdateLayout();
-        var pulseMovesLeft = X(panel.PulseAnchor) == 0 && X(panel.DeviceIndicators) >= panel.PulseAnchor.ActualWidth;
-        var positionPersists = new DashboardViewModel(new BatteryMonitor([provider]), new JsonSettingsStore(path), default).PulseOnLeft;
-        RenderPanel(panel, Path.Combine(folder, "compact-pulse-left.png"));
-        model.PulseOnLeft = false; panel.UpdateLayout();
-        var pulseMovesBackRight = X(panel.PulseAnchor) >= X(panel.DeviceIndicators) + panel.DeviceIndicators.ActualWidth;
-        RenderPanel(panel, Path.Combine(folder, "compact-pulse-right.png"));
-        var sizeWidths = new List<double>();
-        var sizeDetails = new List<object>();
-        var sizesApplyLive = true;
-        foreach (var size in Enum.GetValues<TaskbarIndicatorSize>())
+        async Task Arrange()
         {
-            model.TaskbarSize = size;
             await panel.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
-            ArrangePanel(panel);
-            sizeWidths.Add(panel.ActualWidth);
-            sizeDetails.Add(new { Size = size.ToString(), panel.FontSize, ExpectedFont = model.TaskbarAppearance.FontSize,
-                AnchorWidth = panel.PulseAnchor.ActualWidth, ExpectedAnchor = model.TaskbarAppearance.AnchorWidth, Dividers = VisibleDividers(panel),
-                ReceivesInput = panel.InputHitTest(new Point(panel.ActualWidth - 2, panel.ActualHeight - 2)) is not null });
-            sizesApplyLive &= panel.FontSize == model.TaskbarAppearance.FontSize &&
-                Math.Abs(panel.PulseAnchor.ActualWidth - model.TaskbarAppearance.AnchorWidth) * VisualTreeHelper.GetDpi(panel).DpiScaleX <= 0.5001 && VisibleDividers(panel) == 1 &&
-                panel.InputHitTest(new Point(panel.ActualWidth - 2, panel.ActualHeight - 2)) is not null;
-            RenderPanel(panel, Path.Combine(folder, $"taskbar-size-{size}.png"));
+            panel.Width = double.NaN;
+            panel.Measure(new Size(double.PositiveInfinity, 48));
+            panel.Width = Math.Ceiling(panel.DesiredSize.Width); panel.Height = 48;
+            panel.Arrange(new Rect(0, 0, panel.Width, 48)); panel.UpdateLayout();
+            await panel.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
+            panel.Width = double.NaN; panel.Measure(new Size(double.PositiveInfinity, 48));
+            panel.Width = Math.Ceiling(panel.DesiredSize.Width);
+            panel.Arrange(new Rect(0, 0, panel.Width, 48)); panel.UpdateLayout();
         }
-        sizesApplyLive &= sizeWidths[0] < sizeWidths[1] && sizeWidths[1] < sizeWidths[2];
-        var sizePersists = new JsonSettingsStore(path).Load() is { TaskbarSize: TaskbarIndicatorSize.Large, PulseOnLeft: false };
-        model.TaskbarSize = TaskbarIndicatorSize.Compact;
-        await panel.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
-        ArrangePanel(panel);
+        await Arrange();
+        var originalDevices = model.Devices.ToArray();
+        var originalContainers = Enumerable.Range(0, model.TaskbarDevices.Count)
+            .Select(index => panel.DeviceIndicators.ItemContainerGenerator.ContainerFromIndex(index)).ToArray();
+        var collectionChanges = 0;
+        model.Devices.CollectionChanged += (_, _) => collectionChanges++;
+        model.TaskbarDevices.CollectionChanged += (_, _) => collectionChanges++;
+        foreach (var scale in new[] { 80, 124, 150, 100 })
+        {
+            model.ApplyDashboardSettings(model.Settings with { TaskbarScalePercent = scale, TaskbarSpacing = scale % 25,
+                TaskbarCompactScalePercent = 230 - scale, TaskbarCompactSpacing = 24 - scale % 25 });
+            model.ApplyDashboardState(model.Settings, model.Devices.Select(device => device.Device).ToArray(), false, "", DateTime.Now);
+            await Arrange();
+        }
+        var appearanceKeepsExistingVisuals = collectionChanges == 0 && originalDevices.SequenceEqual(model.Devices) &&
+            originalContainers.SequenceEqual(Enumerable.Range(0, model.TaskbarDevices.Count)
+                .Select(index => panel.DeviceIndicators.ItemContainerGenerator.ContainerFromIndex(index)));
+        var startsVisible = model.TaskbarDevices.Count == 2 && model.Devices.All(device => device.ShowOnTaskbar);
+        var noPulseAnchor = !Children<Button>(panel).Any();
+        var widths = new List<double>();
+        var scalesApply = true;
+        foreach (var scale in new[] { 80, 100, 127, 150 })
+        {
+            model.TaskbarScalePercent = scale;
+            await Arrange();
+            widths.Add(panel.ActualWidth);
+            scalesApply &= panel.FontSize == 11 * scale / 100d &&
+                panel.InputHitTest(new Point(panel.ActualWidth - 2, 2)) is not null;
+        }
+        scalesApply &= widths.Zip(widths.Skip(1)).All(pair => pair.First < pair.Second);
+        model.TaskbarSpacing = 0; await Arrange(); var narrow = panel.ActualWidth;
+        model.TaskbarSpacing = 24; await Arrange();
+        var wide = panel.ActualWidth;
+        var spacingApplies = wide > narrow + 30;
+        var savedAppearance = store.Load() is { TaskbarScalePercent: 150, TaskbarSpacing: 24 };
+        var spacingSamples = new List<object>();
+        var spacingFollowsSettingsInBothLayouts = true;
+        model.TaskbarScalePercent = 100;
+        foreach (var stacked in new[] { false, true })
+        {
+            panel.IsStacked = stacked;
+            var measured = new List<double>();
+            foreach (var spacing in new[] { 0, 1, 2, 4, 10, 15, 24 })
+            {
+                if (stacked) model.TaskbarCompactSpacing = spacing; else model.TaskbarSpacing = spacing;
+                await Arrange();
+                measured.Add(panel.ActualWidth);
+                var paddingMatches = Enumerable.Range(0, panel.DeviceIndicators.Items.Count)
+                    .Select(index => panel.DeviceIndicators.ItemContainerGenerator.ContainerFromIndex(index)).OfType<ContentPresenter>()
+                    .All(presenter => presenter.ContentTemplate.FindName("DeviceContainer", presenter) is Border container &&
+                        container.Padding == new Thickness(spacing / 2d, 0, spacing / 2d, 0));
+                spacingFollowsSettingsInBothLayouts &= paddingMatches;
+                spacingSamples.Add(new { Stacked = stacked, Spacing = spacing, Width = panel.ActualWidth, PaddingMatches = paddingMatches });
+            }
+            // Allow subpixel rounding at adjacent values, but never silently cap larger spacing.
+            spacingFollowsSettingsInBothLayouts &= measured[3] > measured[2] && measured[4] > measured[3] &&
+                measured[5] > measured[4] && measured[6] > measured[5];
+        }
+        model.TaskbarScalePercent = 80; model.TaskbarSpacing = 10;
+        model.TaskbarCompactScalePercent = 100; model.TaskbarCompactSpacing = 8;
+        panel.IsStacked = false; await Arrange(); var separateHorizontalWidth = panel.ActualWidth;
+        model.TaskbarCompactScalePercent = 150; model.TaskbarCompactSpacing = 24;
+        await Arrange(); var compactDoesNotChangeHorizontal = panel.ActualWidth == separateHorizontalWidth;
+        model.TaskbarCompactScalePercent = 100; model.TaskbarCompactSpacing = 8;
+        panel.IsStacked = true; await Arrange(); var separateCompactWidth = panel.ActualWidth;
+        model.TaskbarSpacing = 24; model.TaskbarScalePercent = 150;
+        await Arrange();
+        var profilesAreIndependent = compactDoesNotChangeHorizontal && panel.ActualWidth == separateCompactWidth &&
+            store.Load() is { TaskbarScalePercent: 150, TaskbarSpacing: 24, TaskbarCompactScalePercent: 100, TaskbarCompactSpacing: 8 };
+        model.TaskbarCompactSpacing = 24; panel.IsStacked = false;
+        var stackedReadable = true;
+        var stackedNarrower = true;
+        provider.MouseLevel = 100; provider.MouseCharging = true;
+        await model.RefreshAsync();
+        foreach (var scale in new[] { 80, 100, 150 })
+        {
+            model.TaskbarScalePercent = scale;
+            model.TaskbarCompactScalePercent = scale;
+            panel.IsStacked = false; await Arrange(); var horizontalWidth = panel.ActualWidth;
+            panel.IsStacked = true; await Arrange();
+            stackedNarrower &= panel.ActualWidth < horizontalWidth;
+            stackedReadable &= model.CompactTaskbarAppearance.StackedFontSize >= 11 && model.CompactTaskbarAppearance.StackedPercentFontSize >= 10;
+            foreach (var presenter in Enumerable.Range(0, panel.DeviceIndicators.Items.Count)
+                .Select(index => panel.DeviceIndicators.ItemContainerGenerator.ContainerFromIndex(index)).OfType<ContentPresenter>())
+            {
+                var level = (StackPanel)presenter.ContentTemplate.FindName("StackedLevel", presenter);
+                var icons = (StackPanel)presenter.ContentTemplate.FindName("StackedIcons", presenter);
+                var inline = (StackPanel)presenter.ContentTemplate.FindName("InlineIndicator", presenter);
+                stackedReadable &= inline.Visibility == Visibility.Collapsed && level.IsVisible && icons.IsVisible &&
+                    level.TranslatePoint(new Point(0, level.ActualHeight), panel).Y <= icons.TranslatePoint(new Point(), panel).Y + 0.01 &&
+                    level.TranslatePoint(new Point(), panel).Y >= 0 &&
+                    icons.TranslatePoint(new Point(0, icons.ActualHeight), panel).Y <= 48.01;
+            }
+            var pixelWidth = (int)Math.Ceiling(panel.ActualWidth);
+            var bitmap = new RenderTargetBitmap(pixelWidth, 48, 96, 96, PixelFormats.Pbgra32);
+            var background = new DrawingVisual();
+            using (var dc = background.RenderOpen()) dc.DrawRectangle(new SolidColorBrush(Color.FromRgb(32, 32, 32)), null, new Rect(0, 0, pixelWidth, 48));
+            bitmap.Render(background); bitmap.Render(panel);
+            var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
+            using var image = File.Create(Path.Combine(folder, $"stacked-taskbar-{scale}.png")); encoder.Save(image);
+        }
+        await model.RefreshAsync(); await Arrange();
+        stackedReadable &= panel.IsStacked && panel.DesiredSize.Height <= 48;
+        panel.IsStacked = false;
+        model.TaskbarScalePercent = 150;
+        provider.MouseLevel = 8; provider.MouseCharging = false;
+        await model.RefreshAsync(); await Arrange();
         panel.PrepareMenuForDevice(null);
-        var redundantItemsRemoved = !panel.ContextMenu!.Items.OfType<MenuItem>().Any(item =>
-            AutomationProperties.GetAutomationId(item) is "Taskbar.TogglePanel" or "Taskbar.Language");
-        var applicationRows = panel.ContextMenu!.Items.OfType<MenuItem>().Where(item => AutomationProperties.GetAutomationId(item).StartsWith("Taskbar.DeviceVisibility.", StringComparison.Ordinal)).ToArray();
-        var appListsAllDevices = applicationRows.Length == 2 && applicationRows.All(row => row.IsCheckable && row.IsChecked && row.StaysOpenOnClick && row.Icon is DeviceGlyph);
-        var mouseRow = applicationRows.Single(row => AutomationProperties.GetAutomationId(row).EndsWith("visibility:mouse", StringComparison.Ordinal));
+        var rows = panel.ContextMenu!.Items.OfType<MenuItem>().Where(item => AutomationProperties.GetAutomationId(item).StartsWith("Taskbar.DeviceVisibility.")).ToArray();
+        var allDevicesInTrayMenu = rows.Length == 2 && rows.All(row => row.IsCheckable && row.IsChecked && row.StaysOpenOnClick && row.Icon is DeviceGlyph);
+        var menuShowsBattery = rows.All(row => row.Header?.ToString()?.Contains('%') == true);
+        var noRedundantItems = !panel.ContextMenu.Items.OfType<MenuItem>().Any(item => AutomationProperties.GetAutomationId(item) is "Taskbar.TogglePanel" or "Taskbar.Language");
+        var mouseRow = rows.Single(row => AutomationProperties.GetAutomationId(row).EndsWith("visibility:mouse"));
         mouseRow.IsChecked = false; mouseRow.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
         panel.PrepareMenuForDevice(null);
-        var menuHidesAndKeepsRow = model.TaskbarDevices.Count == 1 && panel.ContextMenu.Items.Contains(mouseRow) && !mouseRow.IsChecked;
-        ArrangePanel(panel);
-        var noDanglingDivider = VisibleDividers(panel) == 0;
+        var menuCanHide = model.TaskbarDevices.Count == 1 && panel.ContextMenu.Items.Contains(mouseRow) && !mouseRow.IsChecked && model.Devices.Count == 2;
         mouseRow.IsChecked = true; mouseRow.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
-        ArrangePanel(panel);
-        dividersBetweenDevices &= VisibleDividers(panel) == 1;
-        var menuRestoresDevice = model.TaskbarDevices.Count == 2 && store.Load().HiddenTaskbarDevices.Length == 0;
+        var menuCanRestore = model.TaskbarDevices.Count == 2 && store.Load().HiddenTaskbarDevices.Length == 0;
         panel.PrepareMenuForDevice(model.Devices.Single(device => device.Device.Id == "visibility:mouse"));
-        var visibleDeviceActions = panel.ContextMenu.Items.OfType<MenuItem>().Where(item => item.Visibility == Visibility.Visible)
-            .Select(AutomationProperties.GetAutomationId).Where(id => id.StartsWith("Taskbar.", StringComparison.Ordinal)).ToArray();
-        var deviceMenuScoped = visibleDeviceActions.SequenceEqual(["Taskbar.IconMenu", "Taskbar.HideDevice"]);
-        var mouse = model.Devices.Single(device => device.Device.Id == "visibility:mouse");
-        mouse.ShowOnTaskbar = false;
-        var toggleFiltersOnlyTaskbar = model.Devices.Count == 2 && !model.IsEmpty && model.TaskbarDevices.Count == 1 &&
-            model.TaskbarDevices[0].Device.Id == "visibility:headset" && panel.DeviceIndicators.Items.Count == 1 && mouse.Device.IsLow(15);
+        var deviceActions = panel.ContextMenu.Items.OfType<MenuItem>().Where(item => item.Visibility == Visibility.Visible)
+            .Select(AutomationProperties.GetAutomationId).Where(id => id.StartsWith("Taskbar.")).ToArray();
+        var scopedDeviceMenu = deviceActions.SequenceEqual(["Taskbar.IconMenu", "Taskbar.TaskbarDevices"]);
+        var sharedRows = panel.DevicesSubmenu.Items.OfType<MenuItem>().ToArray();
+        var headsetRow = sharedRows.Single(row => AutomationProperties.GetAutomationId(row).EndsWith("visibility:headset"));
+        headsetRow.IsChecked = false; headsetRow.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        panel.PrepareMenuForDevice(model.Devices.Single(device => device.Device.Id == "visibility:mouse"));
+        var sharedMenuCanHideOtherDevice = sharedRows.Length == 2 && sharedRows.All(row => row.IsCheckable && row.StaysOpenOnClick) &&
+            model.TaskbarDevices.Count == 1 && model.TaskbarDevices[0].Device.Id == "visibility:mouse" && !headsetRow.IsChecked;
+        headsetRow.IsChecked = true; headsetRow.RaiseEvent(new RoutedEventArgs(MenuItem.ClickEvent));
+        var sharedMenuCanRestoreOtherDevice = model.TaskbarDevices.Count == 2 && store.Load().HiddenTaskbarDevices.Length == 0;
+        model.Devices.Single(device => device.Device.Id == "visibility:mouse").ShowOnTaskbar = false;
         await model.RefreshAsync();
-        var survivesRefresh = !model.Devices.Single(device => device.Device.Id == "visibility:mouse").ShowOnTaskbar && model.TaskbarDevices.Count == 1;
+        var survivesRefresh = model.TaskbarDevices.Count == 1 && !model.Devices.Single(device => device.Device.Id == "visibility:mouse").ShowOnTaskbar;
         var restarted = new DashboardViewModel(new BatteryMonitor([provider]), new JsonSettingsStore(path), default);
         await restarted.RefreshAsync();
-        var survivesRestart = restarted.TaskbarDevices.Count == 1 && store.Load().HiddenTaskbarDevices.SequenceEqual(["visibility:mouse"]);
-        provider.Connected = false;
-        await restarted.RefreshAsync();
-        provider.Connected = true;
-        await restarted.RefreshAsync();
+        var survivesRestart = restarted.TaskbarDevices.Count == 1 && restarted.TaskbarScalePercent == 150 && restarted.TaskbarSpacing == 24;
+        provider.Connected = false; await restarted.RefreshAsync();
+        provider.Connected = true; await restarted.RefreshAsync();
         var survivesReconnect = restarted.TaskbarDevices.Count == 1 && !restarted.Devices.Single(device => device.Device.Id == "visibility:mouse").ShowOnTaskbar;
         restarted.SetDeviceTaskbarVisibility("visibility:mouse", true);
-        var restoresSavedOrder = restarted.TaskbarDevices.Select(device => device.Device.Id).SequenceEqual(["visibility:headset", "visibility:mouse"]) &&
-            restarted.Devices.Single(device => device.Device.Id == "visibility:mouse").ShowOnTaskbar;
-        foreach (var device in restarted.Devices.ToArray()) restarted.SetDeviceTaskbarVisibility(device.Device.Id, false);
-        var canHideAll = restarted.TaskbarDevices.Count == 0 && restarted.Devices.Count == 2 && !restarted.IsEmpty;
-        restarted.Devices.Single(device => device.Device.Id == "visibility:mouse").ShowOnTaskbar = true;
-        var restoresFromApp = restarted.TaskbarDevices is [{ Name: "Test mouse" }] && store.Load().HiddenTaskbarDevices.SequenceEqual(["visibility:headset"]);
-        restarted.LowBatteryThreshold = 25;
-        restarted.SetDeviceKind("visibility:mouse", DeviceKind.Gamepad);
-        var unrelatedSettingsPreserveHidden = store.Load().HiddenTaskbarDevices.SequenceEqual(["visibility:headset"]) && restarted.TaskbarDevices.Count == 1;
-        var header = new DeviceMenuHeader(); header.SetDevice(restarted.TaskbarDevices[0]);
-        var headerIdentifiesDevice = header.Header?.ToString() == "Test mouse" && header.Icon is DeviceGlyph { Kind: DeviceKind.Gamepad } && !header.IsEnabled && !header.IsHitTestVisible;
-        var opens = 0;
-        using var persistentPanel = new TaskbarPanel(restarted, () => opens++);
-        host.RootVisual = persistentPanel;
-        ArrangePanel(persistentPanel);
-        await persistentPanel.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
-        foreach (var device in restarted.Devices.ToArray()) restarted.SetDeviceTaskbarVisibility(device.Device.Id, false);
-        await persistentPanel.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.Loaded);
-        ArrangePanel(persistentPanel);
-        var anchorWidth = Math.Max(1, (int)Math.Ceiling(persistentPanel.DesiredSize.Width));
-        persistentPanel.Arrange(new Rect(0, 0, anchorWidth, 48)); persistentPanel.UpdateLayout();
-        var bitmap = new RenderTargetBitmap(anchorWidth, 48, 96, 96, PixelFormats.Pbgra32); bitmap.Render(persistentPanel);
-        var pixels = new byte[anchorWidth * 48 * 4]; bitmap.CopyPixels(pixels, anchorWidth * 4, 0);
-        var anchorPixels = Enumerable.Range(0, anchorWidth * 48).Count(index => pixels[index * 4 + 3] > 150);
-        var anchorSurvivesHiddenDevices = restarted.TaskbarDevices.Count == 0 && anchorWidth == 28 && persistentPanel.PulseAnchor.Visibility == Visibility.Visible && anchorPixels > 15;
-        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using (var stream = File.Create(Path.Combine(folder, "pulse-anchor-only.png"))) encoder.Save(stream);
-        persistentPanel.PulseAnchor.RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
-        var anchorOpensApp = opens == 1;
-        restarted.SetDeviceTaskbarVisibility("visibility:mouse", true);
-        restarted.TaskbarPanel = false;
-        persistentPanel.Measure(new Size(double.PositiveInfinity, 48)); persistentPanel.UpdateLayout();
-        var anchorSurvivesGlobalHide = persistentPanel.DeviceIndicators.Visibility == Visibility.Collapsed && persistentPanel.PulseAnchor.Visibility == Visibility.Visible;
-        provider.Connected = false; await restarted.RefreshAsync();
-        var anchorSurvivesDisconnect = restarted.Devices.Count == 0 && persistentPanel.PulseAnchor.Visibility == Visibility.Visible;
-        header.SetApplication();
-        var applicationHeader = header.Header?.ToString() == "Pulse" && header.Icon is SvgIcon { Asset: "pulse-mark" } && !header.IsEnabled;
-        var passed = redundantItemsRemoved && sizesApplyLive && sizePersists && pulseOnRight && pulseMovesLeft && positionPersists && pulseMovesBackRight && dividersBetweenDevices && noDanglingDivider && deviceMenuScoped && appListsAllDevices && menuHidesAndKeepsRow && menuRestoresDevice && applicationHeader && anchorSurvivesHiddenDevices && anchorOpensApp && anchorSurvivesGlobalHide && anchorSurvivesDisconnect && initiallyShown && toggleFiltersOnlyTaskbar && survivesRefresh && survivesRestart && survivesReconnect && restoresSavedOrder && canHideAll && restoresFromApp && unrelatedSettingsPreserveHidden && headerIdentifiesDevice;
+        var restoresOrder = restarted.TaskbarDevices.Select(device => device.Device.Id).SequenceEqual(["visibility:headset", "visibility:mouse"]);
+        foreach (var device in model.Devices.ToArray()) model.SetDeviceTaskbarVisibility(device.Device.Id, false);
+        await Arrange();
+        var noEmptyAnchor = panel.DesiredSize.Width == 0 && model.Devices.Count == 2;
+        using var tray = new TrayService(model, () => { });
+        tray.Update();
+        var trayAvailableWithoutDevices = tray.IsVisible;
+        model.SetDeviceTaskbarVisibility("visibility:mouse", true);
+        model.TaskbarPanel = false; await Arrange();
+        var globalHideKeepsTray = tray.IsVisible && panel.DeviceIndicators.Visibility == Visibility.Collapsed;
+        var passed = profilesAreIndependent && appearanceKeepsExistingVisuals && spacingFollowsSettingsInBothLayouts && sharedMenuCanHideOtherDevice && sharedMenuCanRestoreOtherDevice && stackedReadable && stackedNarrower && startsVisible && noPulseAnchor && scalesApply && spacingApplies && savedAppearance && allDevicesInTrayMenu && menuShowsBattery && noRedundantItems && menuCanHide && menuCanRestore && scopedDeviceMenu && survivesRefresh && survivesRestart && survivesReconnect && restoresOrder && noEmptyAnchor && trayAvailableWithoutDevices && globalHideKeepsTray;
         File.WriteAllText(Path.Combine(folder, "taskbar-visibility-checks.json"), JsonSerializer.Serialize(new
         {
-            TestFixtures = true, Passed = passed, InitiallyShowsAllDevices = initiallyShown,
-            RedundantMenuItemsRemoved = redundantItemsRemoved,
-            ToggleFiltersTaskbarWithoutRemovingDeviceOrBatteryAlerts = toggleFiltersOnlyTaskbar,
-            SurvivesRefresh = survivesRefresh, SurvivesRestart = survivesRestart, SurvivesReconnect = survivesReconnect,
-            ReappearsInSavedOrder = restoresSavedOrder, CanHideAllWithoutEmptyingDashboard = canHideAll,
-            CanRestoreFromDashboard = restoresFromApp, IconAndOtherSettingsKeepVisibility = unrelatedSettingsPreserveHidden,
-            ReadOnlyHeaderShowsDeviceNameAndCurrentIcon = headerIdentifiesDevice,
-            PulseAnchorRendersWithAllDevicesHidden = anchorSurvivesHiddenDevices, PulseAnchorOpensApp = anchorOpensApp,
-            PulseAnchorSurvivesGlobalHide = anchorSurvivesGlobalHide, PulseAnchorSurvivesDisconnectedDevices = anchorSurvivesDisconnect,
-            ApplicationHeaderUsesMatchingPulseSvg = applicationHeader,
-            DeviceMenuContainsOnlyDeviceActions = deviceMenuScoped, PulseListsAllDevicesWithMatchingChecks = appListsAllDevices,
-            MenuCanHideWithoutLosingDeviceRow = menuHidesAndKeepsRow, MenuCanRestoreDevice = menuRestoresDevice,
-            PulseDefaultsToRight = pulseOnRight, PulseMovesLeftLive = pulseMovesLeft, PulsePositionPersists = positionPersists,
-            PulseMovesRightLive = pulseMovesBackRight, DividerBetweenVisibleDevices = dividersBetweenDevices,
-            NoDanglingDividerWithOneDevice = noDanglingDivider,
-            TaskbarSizesApplyLiveWithoutLosingHitArea = sizesApplyLive, TaskbarSizePersists = sizePersists, SizeWidths = sizeWidths,
-            SizeDetails = sizeDetails, AnchorOnlyWidth = anchorWidth, AnchorOnlyPixels = anchorPixels
+            Passed = passed, NoPulseAnchorOnTaskbar = noPulseAnchor, ScaleChangesSizeAndPreservesHitArea = scalesApply,
+            AppearanceChangesKeepDeviceVisuals = appearanceKeepsExistingVisuals,
+            LayoutProfilesHaveIndependentSizesAndSpacing = profilesAreIndependent,
+            SpacingChangesWidth = spacingApplies, AppearancePersists = savedAppearance, Widths = widths,
+            SpacingNarrowWidth = narrow, SpacingWideWidth = wide,
+            SpacingFollowsSettingsInBothLayouts = spacingFollowsSettingsInBothLayouts, SpacingSamples = spacingSamples,
+            StackedPercentagesAboveIconsRemainReadable = stackedReadable, StackedLayoutUsesLessWidth = stackedNarrower,
+            MenuListsAllDevices = allDevicesInTrayMenu, MenuShowsBatteryLevels = menuShowsBattery,
+            RedundantItemsRemoved = noRedundantItems, MenuCanHideDevice = menuCanHide, MenuCanRestoreDevice = menuCanRestore,
+            DeviceMenuOffersSharedDeviceList = scopedDeviceMenu,
+            SharedMenuCanHideOtherDevice = sharedMenuCanHideOtherDevice, SharedMenuCanRestoreOtherDevice = sharedMenuCanRestoreOtherDevice,
+            VisibilitySurvivesRefresh = survivesRefresh,
+            VisibilityAndAppearanceSurviveRestart = survivesRestart, VisibilitySurvivesReconnect = survivesReconnect,
+            SavedDeviceOrderRestored = restoresOrder, NoUnusedTaskbarAreaWhenAllHidden = noEmptyAnchor,
+            TrayRemainsAvailable = trayAvailableWithoutDevices && globalHideKeepsTray
         }, new JsonSerializerOptions { WriteIndented = true }));
         return passed;
     }
-
-    private static void ArrangePanel(TaskbarPanel panel)
+    private static IEnumerable<T> Children<T>(DependencyObject parent) where T : DependencyObject
     {
-        panel.Width = double.NaN;
-        panel.Measure(new Size(double.PositiveInfinity, 48));
-        panel.Width = Math.Ceiling(panel.DesiredSize.Width); panel.Height = 48;
-        panel.Arrange(new Rect(0, 0, panel.Width, 48)); panel.UpdateLayout();
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match) yield return match;
+            foreach (var descendant in Children<T>(child)) yield return descendant;
+        }
     }
-    private static int VisibleDividers(TaskbarPanel panel) => Enumerable.Range(0, panel.DeviceIndicators.Items.Count)
-        .Select(index => panel.DeviceIndicators.ItemContainerGenerator.ContainerFromIndex(index)).OfType<ContentPresenter>()
-        .Count(presenter => presenter.ContentTemplate.FindName("DeviceDivider", presenter) is Border { Visibility: Visibility.Visible });
-    private static void RenderPanel(TaskbarPanel panel, string path)
-    {
-        var bitmap = new RenderTargetBitmap((int)Math.Ceiling(panel.ActualWidth), 48, 96, 96, PixelFormats.Pbgra32); bitmap.Render(panel);
-        var encoder = new PngBitmapEncoder(); encoder.Frames.Add(BitmapFrame.Create(bitmap));
-        using var stream = File.Create(path); encoder.Save(stream);
-    }
-
     private sealed class VisibilityProvider : IBatteryProvider
     {
         public bool Connected { get; set; } = true;
+        public int MouseLevel { get; set; } = 8;
+        public bool MouseCharging { get; set; }
         public Task<IReadOnlyList<BatteryDevice>> GetDevicesAsync(CancellationToken cancellationToken) => Task.FromResult<IReadOnlyList<BatteryDevice>>(!Connected ? [] : [
-            new("visibility:mouse", "Test mouse", DeviceKind.Mouse, 8, false, ReadingState.Available, "test", "test"),
+            new("visibility:mouse", "Test mouse", DeviceKind.Mouse, MouseLevel, MouseCharging, ReadingState.Available, "test", "test"),
             new("visibility:headset", "Test headset", DeviceKind.Headset, 80, false, ReadingState.Available, "test", "test")
         ]);
     }

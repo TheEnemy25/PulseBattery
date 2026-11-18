@@ -22,6 +22,7 @@ internal static class PresentationChecks
         var deviceOrderPassed = await DeviceOrderChecks.RunAsync(folder);
         var startupConsentPassed = await StartupConsentChecks.RunAsync(folder);
         var taskbarVisibilityPassed = await TaskbarVisibilityChecks.RunAsync(folder);
+        var dashboardSessionPassed = await DashboardSessionChecks.RunAsync(folder);
         // Explicit test fixtures, isolated from hardware reads and the user's saved settings.
         var fixtures = new FixtureProvider();
         var settings = new MemorySettings();
@@ -29,6 +30,7 @@ internal static class PresentationChecks
         var viewModel = new DashboardViewModel(monitor, settings, default);
         await viewModel.RefreshAsync();
         var panel = new TaskbarPanel(viewModel, () => { });
+        var taskbarMenuStartsUnloaded = panel.ContextMenu is null;
         using var host = new HwndSource(new HwndSourceParameters("Pulse presentation checks")
         {
             WindowStyle = unchecked((int)0x90000000), ExtendedWindowStyle = 0x08000080,
@@ -76,6 +78,7 @@ internal static class PresentationChecks
         restarted.SetDeviceKind("test:headset", null);
         var automaticRestored = restarted.Devices.First(d => d.Device.Id == "test:headset").Kind == DeviceKind.Headset;
         await viewModel.RefreshAsync();
+        _ = panel.IconSubmenu;
         var menuItems = Descendants(panel.ContextMenu!.Items).ToArray();
         var uniformMenuIcons = menuItems.All(item => item.Icon is SvgIcon { Width: SvgIcon.MenuSize, Height: SvgIcon.MenuSize });
         var menuIconsRender = true;
@@ -107,14 +110,16 @@ internal static class PresentationChecks
         var formalEarbudName = Strings.Current["KindEarbuds"] == "Навушники-вкладиші";
         var ukrainianGamepad = viewModel.Devices.First(d => d.Device.Id == "test:gamepad").Category == "ГЕЙМПАД" && Strings.Current["KindGamepad"] == "Геймпад";
         var settingsLanguagePassed = await CheckSettingsLanguageAsync(dashboard, viewModel, settings, folder);
-        var passed = settingsLanguagePassed && taskbarVisibilityPassed && startupConsentPassed && deviceOrderPassed && animationChanged && hitArea && darkForeground && lightForeground && distinctIcons && overrideWorks && gamepadOverrideWorks && englishGamepad && ukrainianGamepad && retainedOffline && restoredAfterReconnect && automaticRestored && uniformMenuIcons && menuIconsRender && formalEarbudName && englishLive && ukrainianLive && englishComplete && ukrainianComplete;
+        var passed = dashboardSessionPassed && taskbarMenuStartsUnloaded && settingsLanguagePassed && taskbarVisibilityPassed && startupConsentPassed && deviceOrderPassed && animationChanged && hitArea && darkForeground && lightForeground && distinctIcons && overrideWorks && gamepadOverrideWorks && englishGamepad && ukrainianGamepad && retainedOffline && restoredAfterReconnect && automaticRestored && uniformMenuIcons && menuIconsRender && formalEarbudName && englishLive && ukrainianLive && englishComplete && ukrainianComplete;
         viewModel.Language = originalLanguage;
         File.WriteAllText(Path.Combine(folder, "presentation-checks.json"), JsonSerializer.Serialize(new
         {
             TestFixtures = true, Passed = passed, ChargingAnimationChanges = animationChanged,
+            TaskbarMenuCreatedOnlyOnDemand = taskbarMenuStartsUnloaded,
             DeviceOrderPersistsAndMatchesTaskbar = deviceOrderPassed,
             StartupRequiresConsentAndCanBeChanged = startupConsentPassed,
             PerDeviceTaskbarVisibilityPersists = taskbarVisibilityPassed,
+            DashboardProcessSynchronizesSettingsAndRefresh = dashboardSessionPassed,
             EntireRectangleReceivesInput = hitArea, DarkThemeWhite = darkForeground, LightThemeBlack = lightForeground,
             SeparateDeviceIcons = distinctIcons, ManualIconOverride = overrideWorks,
             SeparateGamepadIcon = glyphHashes.ContainsKey(DeviceKind.Gamepad) && distinctIcons,
@@ -123,7 +128,7 @@ internal static class PresentationChecks
             AutomaticSelectionRemovesOverride = automaticRestored, MenuIcons18By18 = uniformMenuIcons,
             AllMenuSvgIconsRender = menuIconsRender, FormalEarbudName = formalEarbudName,
             EnglishSwitchesLive = englishLive, UkrainianSwitchesLive = ukrainianLive,
-            SettingsDropdownsKeepSelectionAcrossLanguages = settingsLanguagePassed,
+            SettingsValuesSurviveLanguageSwitch = settingsLanguagePassed,
             BothLanguagesComplete = englishComplete && ukrainianComplete
         }, new JsonSerializerOptions { WriteIndented = true }));
         return passed;
@@ -131,8 +136,11 @@ internal static class PresentationChecks
     private static async Task<bool> CheckSettingsLanguageAsync(Dashboard dashboard, DashboardViewModel model, MemorySettings settings, string folder)
     {
         var originalLanguage = model.Language;
-        var originalPosition = model.PulseOnLeft;
-        var originalSize = model.TaskbarSize;
+        var originalSpacing = model.TaskbarSpacing;
+        var originalScale = model.TaskbarScalePercent;
+        var originalCompactScale = model.TaskbarCompactScalePercent;
+        var originalCompactSpacing = model.TaskbarCompactSpacing;
+        var originalMode = model.TaskbarLayoutMode;
         var samples = new List<object>();
         var passed = true;
         dashboard.WindowStartupLocation = WindowStartupLocation.Manual;
@@ -147,35 +155,44 @@ internal static class PresentationChecks
             await selector.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
             dashboard.UpdateLayout();
         }
-        foreach (var position in new[] { false, true })
-        foreach (var size in Enum.GetValues<TaskbarIndicatorSize>())
+        foreach (var spacing in new[] { 0, 10, 24 })
+        foreach (var scale in new[] { 80, 100, 127, 150 })
         {
-            await SetSelection(dashboard.PulsePositionSelector, position);
-            await SetSelection(dashboard.TaskbarSizeSelector, size);
+            dashboard.TaskbarScaleSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)scale);
+            dashboard.TaskbarSpacingSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)spacing);
+            var compactScale = 230 - scale;
+            var compactSpacing = 24 - spacing;
+            var mode = spacing == 0 ? 0 : 1;
+            dashboard.TaskbarCompactScaleSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)compactScale);
+            dashboard.TaskbarCompactSpacingSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)compactSpacing);
+            dashboard.TaskbarLayoutSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)mode);
             foreach (var language in new[] { "en", "uk", "en" })
             {
                 await SetSelection(dashboard.LanguageSelector, language);
-                var positionName = Strings.Current[position ? "PulsePositionLeft" : "PulsePositionRight"];
-                var sizeName = Strings.Current["TaskbarSize" + size];
-                var selectionMatches = dashboard.PulsePositionSelector.SelectedItem is PulsePositionChoice selectedPosition &&
-                    selectedPosition.IsLeft == position && selectedPosition.Name == positionName &&
-                    dashboard.TaskbarSizeSelector.SelectedItem is TaskbarSizeChoice selectedSize &&
-                    selectedSize.Size == size && selectedSize.Name == sizeName;
-                var labelsVisible = VisualChildren<TextBlock>(dashboard.PulsePositionSelector).Any(text => text.Text == positionName) &&
-                    VisualChildren<TextBlock>(dashboard.TaskbarSizeSelector).Any(text => text.Text == sizeName);
-                var noValidationErrors = !Validation.GetHasError(dashboard.PulsePositionSelector) && !Validation.GetHasError(dashboard.TaskbarSizeSelector);
+                var selectionMatches = dashboard.TaskbarScaleSlider.Value == scale && dashboard.TaskbarSpacingSlider.Value == spacing &&
+                    dashboard.TaskbarCompactScaleSlider.Value == compactScale && dashboard.TaskbarCompactSpacingSlider.Value == compactSpacing &&
+                    dashboard.TaskbarLayoutSlider.Value == mode;
+                var labelsVisible = VisualChildren<TextBlock>(dashboard).Any(text => text.Text == Strings.Current["TaskbarSpacing"]);
+                var noValidationErrors = !Validation.GetHasError(dashboard.TaskbarScaleSlider) && !Validation.GetHasError(dashboard.TaskbarSpacingSlider) &&
+                    !Validation.GetHasError(dashboard.TaskbarCompactScaleSlider) && !Validation.GetHasError(dashboard.TaskbarCompactSpacingSlider) &&
+                    !Validation.GetHasError(dashboard.TaskbarLayoutSlider);
                 var saved = settings.Load();
-                var settingsPreserved = saved.PulseOnLeft == position && saved.TaskbarSize == size && saved.Language == language &&
-                    model.PulseOnLeft == position && model.TaskbarSize == size;
+                var settingsPreserved = saved.TaskbarSpacing == spacing && saved.TaskbarScalePercent == scale && saved.Language == language &&
+                    model.TaskbarSpacing == spacing && model.TaskbarScalePercent == scale &&
+                    saved.TaskbarCompactScalePercent == compactScale && saved.TaskbarCompactSpacing == compactSpacing &&
+                    model.TaskbarLayoutMode == mode && saved.TaskbarLayout == (mode == 1 ? TaskbarLayoutPreference.Compact : TaskbarLayoutPreference.Horizontal);
                 passed &= selectionMatches && labelsVisible && noValidationErrors && settingsPreserved;
-                samples.Add(new { Language = language, PulseOnLeft = position, Size = size.ToString(),
+                samples.Add(new { Language = language, Spacing = spacing, Scale = scale,
                     SelectionMatches = selectionMatches, TranslatedLabelsVisible = labelsVisible,
                     NoValidationErrors = noValidationErrors, SavedSettingsPreserved = settingsPreserved });
             }
         }
         Render((Visual)dashboard.Content, 960, 690, Path.Combine(folder, "settings-language-switch.png"));
-        await SetSelection(dashboard.PulsePositionSelector, originalPosition);
-        await SetSelection(dashboard.TaskbarSizeSelector, originalSize);
+        model.TaskbarSpacing = originalSpacing;
+        model.TaskbarScalePercent = originalScale;
+        model.TaskbarCompactScalePercent = originalCompactScale;
+        model.TaskbarCompactSpacing = originalCompactSpacing;
+        model.TaskbarLayoutMode = originalMode;
         await SetSelection(dashboard.LanguageSelector, originalLanguage);
         File.WriteAllText(Path.Combine(folder, "settings-language-checks.json"), JsonSerializer.Serialize(new
         { Passed = passed, Samples = samples }, new JsonSerializerOptions { WriteIndented = true }));

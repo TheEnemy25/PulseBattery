@@ -21,6 +21,7 @@ public sealed class DashboardViewModel : ObservableObject
     public event Action? SettingsChanged;
     public event Action? DevicesChanged;
     public AppSettings Settings => _settings;
+    internal DateTime? LastRefreshAt => _lastRefresh;
     public bool IsBusy { get => _isBusy; private set { Set(ref _isBusy, value); RefreshCommand.Update(); Changed(nameof(RefreshLabel)); } }
     public string RefreshLabel => Strings.Current[IsBusy ? "Reading" : "RefreshButton"];
     public bool SettingsOpen { get => _settingsOpen; set => Set(ref _settingsOpen, value); }
@@ -47,35 +48,68 @@ public sealed class DashboardViewModel : ObservableObject
     public int LowBatteryThreshold { get => _settings.LowBatteryThreshold; set { _settings = (_settings with { LowBatteryThreshold = value }).Validate(); Save(); Changed(); RebuildDevices(); } }
     public bool Notifications { get => _settings.LowBatteryNotifications; set { _settings = _settings with { LowBatteryNotifications = value }; Save(); Changed(); } }
     public bool TaskbarPanel { get => _settings.ShowTaskbarPanel; set { _settings = _settings with { ShowTaskbarPanel = value }; Save(); Changed(); } }
-    public bool PulseOnLeft
+    public int TaskbarScalePercent
     {
-        get => _settings.PulseOnLeft;
-        set { if (_settings.PulseOnLeft == value) return; _settings = _settings with { PulseOnLeft = value }; Changed(); Save(); }
-    }
-    public IReadOnlyList<PulsePositionChoice> PulsePositions { get; } = [new(true), new(false)];
-    public TaskbarIndicatorSize TaskbarSize
-    {
-        get => _settings.TaskbarSize;
+        get => _settings.TaskbarScalePercent ?? 100;
         set
         {
-            var updated = (_settings with { TaskbarSize = value }).Validate();
-            if (updated.TaskbarSize == _settings.TaskbarSize) return;
+            var updated = (_settings with { TaskbarScalePercent = value }).Validate();
+            if (updated.TaskbarScalePercent == TaskbarScalePercent) return;
             _settings = updated; Changed(); Changed(nameof(TaskbarAppearance)); Save();
         }
     }
-    public TaskbarAppearance TaskbarAppearance => TaskbarAppearance.For(TaskbarSize);
-    public IReadOnlyList<TaskbarSizeChoice> TaskbarSizes { get; } = Enum.GetValues<TaskbarIndicatorSize>()
-        .Select(size => new TaskbarSizeChoice(size)).ToArray();
+    public int TaskbarSpacing
+    {
+        get => _settings.TaskbarSpacing ?? 10;
+        set
+        {
+            var updated = (_settings with { TaskbarSpacing = value }).Validate();
+            if (updated.TaskbarSpacing == TaskbarSpacing) return;
+            _settings = updated; Changed(); Changed(nameof(TaskbarAppearance)); Save();
+        }
+    }
+    public TaskbarAppearance TaskbarAppearance => TaskbarAppearance.For(TaskbarScalePercent, TaskbarSpacing);
+    public TaskbarAppearance CompactTaskbarAppearance => TaskbarAppearance.For(TaskbarCompactScalePercent, TaskbarCompactSpacing);
+    public int TaskbarLayoutMode
+    {
+        get => _settings.TaskbarLayout == TaskbarLayoutPreference.Compact ? 1 : 0;
+        set
+        {
+            var mode = value == 1 ? TaskbarLayoutPreference.Compact : TaskbarLayoutPreference.Horizontal;
+            if (_settings.TaskbarLayout == mode) return;
+            _settings = _settings with { TaskbarLayout = mode }; Changed(); Save();
+        }
+    }
+    public int TaskbarCompactScalePercent
+    {
+        get => _settings.TaskbarCompactScalePercent ?? 100;
+        set
+        {
+            var updated = (_settings with { TaskbarCompactScalePercent = value }).Validate();
+            if (updated.TaskbarCompactScalePercent == TaskbarCompactScalePercent) return;
+            _settings = updated; Changed(); Changed(nameof(CompactTaskbarAppearance)); Save();
+        }
+    }
+    public int TaskbarCompactSpacing
+    {
+        get => _settings.TaskbarCompactSpacing ?? 10;
+        set
+        {
+            var updated = (_settings with { TaskbarCompactSpacing = value }).Validate();
+            if (updated.TaskbarCompactSpacing == TaskbarCompactSpacing) return;
+            _settings = updated; Changed(); Changed(nameof(CompactTaskbarAppearance)); Save();
+        }
+    }
     public bool StartWithWindows { get => _settings.StartWithWindows == true; set => SetStartupPreference(value); }
     public bool NeedsStartupChoice => _settings.StartWithWindows is null;
 
-    public DashboardViewModel(IBatteryMonitor monitor, ISettingsStore settingsStore, CancellationToken lifetime, IStartupRegistration? startupRegistration = null)
+    public DashboardViewModel(IBatteryMonitor monitor, ISettingsStore settingsStore, CancellationToken lifetime, IStartupRegistration? startupRegistration = null, Func<Task>? requestRefresh = null)
     {
         _monitor = monitor; _settingsStore = settingsStore; _lifetime = lifetime;
         _startupRegistration = startupRegistration;
-        _settings = settingsStore.Load();
+        _settings = settingsStore.Load().Validate();
         Strings.Current.SetLanguage(_settings.Language);
-        RefreshCommand = new(RefreshAsync, () => !IsBusy);
+        RefreshCommand = new(requestRefresh ?? RefreshAsync, () => !IsBusy);
         Strings.Current.LanguageChanged += OnLanguageChanged;
     }
 
@@ -88,9 +122,7 @@ public sealed class DashboardViewModel : ObservableObject
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime);
             timeout.CancelAfter(TimeSpan.FromSeconds(20));
             var result = await _monitor.ScanAsync(timeout.Token);
-            Devices.Clear();
-            foreach (var device in DeviceOrdering.Apply(result.Devices, _settings.DeviceOrder)) Devices.Add(CreateDevice(device));
-            RefreshTaskbarDevices();
+            SynchronizeDevices(result.Devices);
             Error = string.Join(Environment.NewLine, result.Errors);
             _lastRefresh = DateTime.Now; Changed(nameof(Status));
             DevicesChanged?.Invoke();
@@ -109,9 +141,32 @@ public sealed class DashboardViewModel : ObservableObject
     private void RebuildDevices()
     {
         var devices = Devices.Select(d => d.Device).ToArray();
-        Devices.Clear(); foreach (var device in DeviceOrdering.Apply(devices, _settings.DeviceOrder)) Devices.Add(CreateDevice(device));
+        if (SynchronizeDevices(devices)) { Changed(nameof(Health)); DevicesChanged?.Invoke(); }
+    }
+    private bool SynchronizeDevices(IReadOnlyList<BatteryDevice> readings)
+    {
+        var existing = Devices.ToDictionary(device => device.Device.Id, StringComparer.Ordinal);
+        var ordered = DeviceOrdering.Apply(readings, _settings.DeviceOrder).ToArray();
+        var changed = false;
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var reading = ordered[index];
+            if (!existing.TryGetValue(reading.Id, out var device))
+            {
+                device = CreateDevice(reading); Devices.Insert(index, device); changed = true;
+            }
+            else
+            {
+                changed |= device.Update(reading, LowBatteryThreshold,
+                    _settings.DeviceKinds.TryGetValue(reading.Id, out var kind) ? kind : null,
+                    !_settings.HiddenTaskbarDevices.Contains(reading.Id, StringComparer.Ordinal));
+                var position = Devices.IndexOf(device);
+                if (position != index) { Devices.Move(position, index); changed = true; }
+            }
+        }
+        while (Devices.Count > ordered.Length) { Devices.RemoveAt(Devices.Count - 1); changed = true; }
         RefreshTaskbarDevices();
-        Changed(nameof(Health)); DevicesChanged?.Invoke();
+        return changed;
     }
     private DeviceViewModel CreateDevice(BatteryDevice device) => new(device, LowBatteryThreshold,
         _settings.DeviceKinds.TryGetValue(device.Id, out var kind) ? kind : null,
@@ -189,24 +244,49 @@ public sealed class DashboardViewModel : ObservableObject
     }
     private void OnLanguageChanged()
     {
-        // Keep the selected objects in each ComboBox; replacing ItemsSource can write
-        // a temporary null SelectedValue back into the non-nullable settings bindings.
-        foreach (var choice in PulsePositions) choice.RefreshName();
-        foreach (var choice in TaskbarSizes) choice.RefreshName();
-        Changed(null); RebuildDevices();
+        Changed(null);
+        foreach (var device in Devices) device.RefreshLocalization();
+    }
+    internal void ApplyDashboardSettings(AppSettings settings)
+    {
+        settings = settings.Validate();
+        if (_settings.StartWithWindows != settings.StartWithWindows && settings.StartWithWindows.HasValue &&
+            !SetStartupPreference(settings.StartWithWindows.Value)) return;
+        var previous = _settings;
+        _settings = settings;
+        Strings.Current.SetLanguage(settings.Language);
+        NotifySettingsChanges(previous); RebuildDevices(); Save();
+    }
+    internal void ApplyDashboardState(AppSettings settings, IReadOnlyList<BatteryDevice> devices, bool busy, string error, DateTime? lastRefresh)
+    {
+        var previous = _settings;
+        _settings = settings.Validate();
+        Strings.Current.SetLanguage(_settings.Language);
+        var changed = SynchronizeDevices(devices);
+        _lastRefresh = lastRefresh;
+        Error = error; IsBusy = busy;
+        NotifySettingsChanges(previous);
+        Changed(nameof(Status)); Changed(nameof(IsEmpty)); Changed(nameof(DeviceCount)); Changed(nameof(Health));
+        if (changed) DevicesChanged?.Invoke();
+    }
+    private void NotifySettingsChanges(AppSettings previous)
+    {
+        if (previous.Language != _settings.Language) Changed(nameof(Language));
+        if (previous.RefreshSeconds != _settings.RefreshSeconds) { Changed(nameof(RefreshSeconds)); Changed(nameof(RefreshHint)); }
+        if (previous.LowBatteryThreshold != _settings.LowBatteryThreshold) Changed(nameof(LowBatteryThreshold));
+        if (previous.LowBatteryNotifications != _settings.LowBatteryNotifications) Changed(nameof(Notifications));
+        if (previous.ShowTaskbarPanel != _settings.ShowTaskbarPanel) Changed(nameof(TaskbarPanel));
+        if (previous.StartWithWindows != _settings.StartWithWindows) { Changed(nameof(StartWithWindows)); Changed(nameof(NeedsStartupChoice)); }
+        if (previous.TaskbarScalePercent != _settings.TaskbarScalePercent) Changed(nameof(TaskbarScalePercent));
+        if (previous.TaskbarSpacing != _settings.TaskbarSpacing) Changed(nameof(TaskbarSpacing));
+        if (previous.TaskbarLayout != _settings.TaskbarLayout) Changed(nameof(TaskbarLayoutMode));
+        if (previous.TaskbarCompactScalePercent != _settings.TaskbarCompactScalePercent) Changed(nameof(TaskbarCompactScalePercent));
+        if (previous.TaskbarCompactSpacing != _settings.TaskbarCompactSpacing) Changed(nameof(TaskbarCompactSpacing));
+        if (previous.TaskbarCompactScalePercent != _settings.TaskbarCompactScalePercent || previous.TaskbarCompactSpacing != _settings.TaskbarCompactSpacing)
+            Changed(nameof(CompactTaskbarAppearance));
+        if (previous.TaskbarScalePercent != _settings.TaskbarScalePercent || previous.TaskbarSpacing != _settings.TaskbarSpacing)
+            Changed(nameof(TaskbarAppearance));
     }
 }
 
 public sealed record LanguageChoice(string Code, string Name);
-public sealed class PulsePositionChoice(bool isLeft) : ObservableObject
-{
-    public bool IsLeft { get; } = isLeft;
-    public string Name => Strings.Current[IsLeft ? "PulsePositionLeft" : "PulsePositionRight"];
-    internal void RefreshName() => Changed(nameof(Name));
-}
-public sealed class TaskbarSizeChoice(TaskbarIndicatorSize size) : ObservableObject
-{
-    public TaskbarIndicatorSize Size { get; } = size;
-    public string Name => Strings.Current["TaskbarSize" + Size];
-    internal void RefreshName() => Changed(nameof(Name));
-}

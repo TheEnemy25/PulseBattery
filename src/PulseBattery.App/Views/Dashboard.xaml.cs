@@ -1,13 +1,14 @@
 using System.Windows;
 using System.Windows.Data;
 using PulseBattery.App.ViewModels;
+using PulseBattery.App.Services;
 
 namespace PulseBattery.App.Views;
 
 public partial class Dashboard : Window
 {
     private readonly DashboardViewModel _viewModel;
-    public Dashboard(DashboardViewModel viewModel) { InitializeComponent(); DataContext = _viewModel = viewModel; }
+    public Dashboard(DashboardViewModel viewModel) { MenuResources.EnsureLoaded(); InitializeComponent(); DataContext = _viewModel = viewModel; }
     private void ToggleSettings(object sender, RoutedEventArgs e) => _viewModel.SettingsOpen = !_viewModel.SettingsOpen;
     private void ToggleTaskbarPanel(object sender, RoutedEventArgs e) => _viewModel.TaskbarPanel = !_viewModel.TaskbarPanel;
     private void Minimize(object sender, RoutedEventArgs e) => Close();

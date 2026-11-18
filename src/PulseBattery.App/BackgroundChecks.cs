@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Windows;
@@ -13,56 +12,55 @@ public partial class App
     {
         Directory.CreateDirectory(folder);
         await Task.Delay(1500);
-        var backgroundStartsWithoutDashboard = _dashboard is null;
+        var backgroundStartsWithoutDashboard = _dashboardSession is null && !Windows.OfType<Views.Dashboard>().Any();
         var background = MemorySnapshot();
         using var process = Process.GetCurrentProcess();
         var idleStart = process.TotalProcessorTime;
         await Task.Delay(3000);
         process.Refresh();
         var idleCpuMilliseconds = (process.TotalProcessorTime - idleStart).TotalMilliseconds;
-        var closedWindows = new List<WeakReference>();
         var samples = new List<object>();
         var opensOneWindow = true;
         var closesWindow = true;
+        var residentNeverConstructsDashboard = true;
         for (var cycle = 0; cycle < 3; cycle++)
         {
-            OpenDashboardForCheck();
+            ShowDashboard();
+            var session = _dashboardSession!;
+            ShowDashboard();
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (!session.IsReady && session.IsRunning && DateTime.UtcNow < deadline) await Task.Delay(50);
+            await Task.Delay(300);
+            opensOneWindow &= ReferenceEquals(session, _dashboardSession) && session.IsReady && session.IsRunning;
+            residentNeverConstructsDashboard &= !Windows.OfType<Views.Dashboard>().Any();
+            if (!session.IsRunning) { closesWindow = false; break; }
+            using var child = Process.GetProcessById(session.ProcessId);
+            samples.Add(new { Cycle = cycle + 1, Resident = MemorySnapshot(), Dashboard = new
+            {
+                PrivateBytes = child.PrivateMemorySize64, WorkingSetBytes = child.WorkingSet64,
+                PrivateWorkingSetBytes = PrivateWorkingSet(child)
+            } });
+            session.CloseWindow();
+            deadline = DateTime.UtcNow.AddSeconds(10);
+            while (!child.HasExited && DateTime.UtcNow < deadline) await Task.Delay(50);
             await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
             await Task.Delay(300);
-            opensOneWindow &= Windows.OfType<Views.Dashboard>().Count() == 1 && _dashboard?.IsVisible == true;
-            samples.Add(new { Cycle = cycle + 1, Open = MemorySnapshot() });
-            closedWindows.Add(CloseDashboardForCheck());
-            await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ApplicationIdle);
-            await Task.Delay(300);
-            closesWindow &= _dashboard is null && !Windows.OfType<Views.Dashboard>().Any();
+            closesWindow &= child.HasExited && _dashboardSession is null;
         }
-        // Diagnostic collection only: prove that no application root retains closed windows.
-        GC.Collect(); GC.WaitForPendingFinalizers(); GC.Collect();
-        await Task.Delay(300);
-        var closedWindowsCollected = closedWindows.All(reference => !reference.IsAlive);
-        var afterClosing = MemorySnapshot();
-        var passed = backgroundStartsWithoutDashboard && opensOneWindow && closesWindow && closedWindowsCollected;
+        var afterClosingBeforeCollection = MemorySnapshot();
+        var trayAvailable = _tray?.IsVisible == true;
+        var passed = backgroundStartsWithoutDashboard && opensOneWindow && closesWindow && residentNeverConstructsDashboard && trayAvailable;
         File.WriteAllText(Path.Combine(folder, "background-checks.json"), JsonSerializer.Serialize(new
         {
             Passed = passed, BackgroundStartsWithoutDashboard = backgroundStartsWithoutDashboard,
             RepeatedOpenReusesOneWindow = opensOneWindow, CloseDestroysDashboard = closesWindow,
-            ClosedWindowsCollected = closedWindowsCollected, Background = background,
+            DashboardProcessesExit = closesWindow, ResidentNeverConstructsDashboard = residentNeverConstructsDashboard, Background = background,
+            TrayRemainsAvailable = trayAvailable, AfterClosingBeforeCollection = afterClosingBeforeCollection,
             IdleSampleSeconds = 3, IdleCpuMilliseconds = idleCpuMilliseconds,
-            OpenSamples = samples, AfterClosing = afterClosing,
-            Note = "Same-process WPF measurements; working set includes shared pages. GC is forced only for this diagnostic."
+            OpenSamples = samples,
+            Note = "No forced collection or working-set trimming. The resident monitor and temporary dashboard are measured separately; both count while the window is open."
         }, new JsonSerializerOptions { WriteIndented = true }));
         return passed;
-    }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private void OpenDashboardForCheck() { ShowDashboard(); ShowDashboard(); }
-
-    [MethodImpl(MethodImplOptions.NoInlining)]
-    private WeakReference CloseDashboardForCheck()
-    {
-        var reference = new WeakReference(_dashboard!);
-        _dashboard!.Close();
-        return reference;
     }
 
     private static object MemorySnapshot()

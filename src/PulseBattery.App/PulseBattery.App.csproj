@@ -12,6 +12,7 @@
     <Version>0.1.0</Version>
     <ApplicationIcon>Assets/Pulse.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <TieredCompilation>false</TieredCompilation>
   </PropertyGroup>
 
   <ItemGroup>

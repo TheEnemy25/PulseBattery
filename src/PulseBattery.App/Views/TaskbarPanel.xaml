@@ -2,44 +2,38 @@
              xmlns:loc="clr-namespace:PulseBattery.App.Localization"
              FontFamily="Segoe UI" FontSize="{Binding TaskbarAppearance.FontSize}" Cursor="Hand" Focusable="False" Background="#01000000" Foreground="White" UseLayoutRounding="True">
     <Grid>
-    <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
     <ItemsControl x:Name="DeviceIndicators" ItemsSource="{Binding TaskbarDevices}" AlternationCount="2147483647" VerticalAlignment="Stretch" Visibility="{Binding TaskbarPanel, Converter={StaticResource BoolVisibility}}">
-        <ItemsControl.Style><Style TargetType="ItemsControl"><Setter Property="Grid.Column" Value="0" /><Style.Triggers><DataTrigger Binding="{Binding PulseOnLeft}" Value="True"><Setter Property="Grid.Column" Value="1" /></DataTrigger></Style.Triggers></Style></ItemsControl.Style>
         <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
         <ItemsControl.ItemContainerStyle><Style TargetType="ContentPresenter"><Setter Property="VerticalAlignment" Value="Stretch" /></Style></ItemsControl.ItemContainerStyle>
         <ItemsControl.ItemTemplate><DataTemplate>
             <Grid Background="#01000000">
             <Grid.ColumnDefinitions><ColumnDefinition Width="Auto" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-            <Border x:Name="DeviceDivider" Width="1" Height="{Binding DataContext.TaskbarAppearance.DividerHeight, RelativeSource={RelativeSource AncestorType=UserControl}}" VerticalAlignment="Center" Opacity="0.45" Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}" IsHitTestVisible="False">
+            <Border x:Name="DeviceDivider" Width="1" VerticalAlignment="Center" Opacity="0.45" Background="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}" IsHitTestVisible="False">
                 <Border.Style><Style TargetType="Border"><Style.Triggers><DataTrigger Binding="{Binding (ItemsControl.AlternationIndex), RelativeSource={RelativeSource AncestorType=ContentPresenter}}" Value="0"><Setter Property="Visibility" Value="Collapsed" /></DataTrigger></Style.Triggers></Style></Border.Style>
             </Border>
-            <Border Grid.Column="1" Padding="{Binding DataContext.TaskbarAppearance.DevicePadding, RelativeSource={RelativeSource AncestorType=UserControl}}" Background="#01000000" VerticalAlignment="Stretch" ToolTipService.Placement="Top" Opacity="{Binding TaskbarOpacity}">
+            <Border x:Name="DeviceContainer" Grid.Column="1" Background="#01000000" VerticalAlignment="Stretch" ToolTipService.Placement="Top" Opacity="{Binding TaskbarOpacity}">
                 <Border.ToolTip><StackPanel><TextBlock Text="{Binding Name}" FontWeight="SemiBold" /><TextBlock Text="{Binding Status}" /></StackPanel></Border.ToolTip>
-                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Grid VerticalAlignment="Center">
+                <StackPanel x:Name="InlineIndicator" Orientation="Horizontal" VerticalAlignment="Center">
                     <controls:DeviceGlyph Kind="{Binding Kind}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}" Width="{Binding DataContext.TaskbarAppearance.IconSize, RelativeSource={RelativeSource AncestorType=UserControl}}" Height="{Binding Width, RelativeSource={RelativeSource Self}}" Margin="0,0,4,0" />
                     <TextBlock Text="{Binding Level}" FontWeight="SemiBold" />
                     <TextBlock Text="{Binding Percent}" FontSize="{Binding DataContext.TaskbarAppearance.PercentFontSize, RelativeSource={RelativeSource AncestorType=UserControl}}" Margin="1,0,0,0" />
                     <controls:ChargingIndicator Width="{Binding DataContext.TaskbarAppearance.ChargingSize, RelativeSource={RelativeSource AncestorType=UserControl}}" Height="{Binding Width, RelativeSource={RelativeSource Self}}" Margin="4,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}" Visibility="{Binding IsCharging, Converter={StaticResource BoolVisibility}}" ToolTip="{loc:Text Charging}" />
                 </StackPanel>
+                <StackPanel x:Name="StackedIndicator" HorizontalAlignment="Center" Visibility="Collapsed">
+                    <StackPanel x:Name="StackedLevel" Orientation="Horizontal" HorizontalAlignment="Center">
+                        <TextBlock Text="{Binding Level}" FontWeight="SemiBold" FontSize="{Binding DataContext.CompactTaskbarAppearance.StackedFontSize, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                        <TextBlock Text="{Binding Percent}" VerticalAlignment="Center" Margin="1,0,0,0" FontSize="{Binding DataContext.CompactTaskbarAppearance.StackedPercentFontSize, RelativeSource={RelativeSource AncestorType=UserControl}}" />
+                    </StackPanel>
+                    <StackPanel x:Name="StackedIcons" Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,1,0,0">
+                        <controls:DeviceGlyph Kind="{Binding Kind}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}" Width="{Binding DataContext.CompactTaskbarAppearance.StackedIconSize, RelativeSource={RelativeSource AncestorType=UserControl}}" Height="{Binding Width, RelativeSource={RelativeSource Self}}" />
+                        <controls:ChargingIndicator Width="{Binding DataContext.CompactTaskbarAppearance.StackedChargingSize, RelativeSource={RelativeSource AncestorType=UserControl}}" Height="{Binding Width, RelativeSource={RelativeSource Self}}" Margin="3,0,0,0" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}" Visibility="{Binding IsCharging, Converter={StaticResource BoolVisibility}}" ToolTip="{loc:Text Charging}" />
+                    </StackPanel>
+                </StackPanel>
+                </Grid>
             </Border>
             </Grid>
         </DataTemplate></ItemsControl.ItemTemplate>
     </ItemsControl>
-    <Button x:Name="PulseAnchor" Width="{Binding TaskbarAppearance.AnchorWidth}" Padding="0" Cursor="Hand" Click="OpenPulse"
-            Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}"
-            ToolTip="{loc:Text Open}" AutomationProperties.Name="{loc:Text Open}" AutomationProperties.AutomationId="PulseTaskbarAnchor">
-        <Button.Style><Style TargetType="Button"><Setter Property="Grid.Column" Value="1" /><Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
-            <Grid Background="Transparent">
-                <Border x:Name="Hover" Background="{TemplateBinding Foreground}" Opacity="0" CornerRadius="4" Margin="2,6" />
-                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" />
-            </Grid>
-            <ControlTemplate.Triggers>
-                <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Hover" Property="Opacity" Value="0.10" /></Trigger>
-                <Trigger Property="IsPressed" Value="True"><Setter TargetName="Hover" Property="Opacity" Value="0.18" /></Trigger>
-                <Trigger Property="IsKeyboardFocused" Value="True"><Setter TargetName="Hover" Property="Opacity" Value="0.10" /></Trigger>
-            </ControlTemplate.Triggers>
-        </ControlTemplate></Setter.Value></Setter><Style.Triggers><DataTrigger Binding="{Binding PulseOnLeft}" Value="True"><Setter Property="Grid.Column" Value="0" /></DataTrigger></Style.Triggers></Style></Button.Style>
-        <controls:SvgIcon Asset="pulse-mark" Width="{Binding TaskbarAppearance.IconSize}" Height="{Binding Width, RelativeSource={RelativeSource Self}}" Foreground="{Binding Foreground, RelativeSource={RelativeSource AncestorType=UserControl}}" />
-    </Button>
     </Grid>
 </UserControl>

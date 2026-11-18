@@ -22,7 +22,8 @@ public partial class App : Application
     private Mutex? _instance;
     private EventWaitHandle? _activation;
     private RegisteredWaitHandle? _activationWait;
-    private Dashboard? _dashboard;
+    private DashboardSession? _dashboardSession;
+    private DashboardClient? _dashboardClient;
     private HwndSource? _messageSource;
     private TaskbarPanelService? _taskbar;
     private DashboardViewModel? _viewModel;
@@ -39,6 +40,19 @@ public partial class App : Application
         RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
         try
         {
+            if (e.Args.Contains("--check-motion"))
+            {
+                var folder = e.Args.SkipWhile(a => a != "--check-motion").Skip(1).FirstOrDefault() ?? "artifacts/motion-checks";
+                var valid = await TaskbarMotionChecks.RunAsync(folder);
+                IsExiting = true; Shutdown(valid ? 0 : 1); return;
+            }
+            if (e.Args.Contains("--dashboard-session"))
+            {
+                var pipe = e.Args.SkipWhile(a => a != "--dashboard-session").Skip(1).First();
+                _dashboardClient = new();
+                await _dashboardClient.RunAsync(pipe, _lifetime.Token);
+                IsExiting = true; Shutdown(); return;
+            }
             if (e.Args.Contains("--check-presentation"))
             {
                 var folder = e.Args.SkipWhile(a => a != "--check-presentation").Skip(1).FirstOrDefault() ?? "artifacts/presentation-checks";
@@ -84,7 +98,6 @@ public partial class App : Application
             }
             _tray = new(_viewModel, ShowDashboard);
             _taskbar = new(_viewModel, ShowDashboard);
-            _taskbar.AvailabilityChanged += _tray.SetTaskbarAvailable;
             _viewModel.DevicesChanged += () => { _tray.Update(); _taskbar.Update(); };
             _viewModel.SettingsChanged += ApplySettings;
             _timer = new DispatcherTimer();
@@ -120,9 +133,9 @@ public partial class App : Application
             if (e.Args.Contains("--check-taskbar"))
             {
                 await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
-                await Task.Delay(500);
+                await _taskbar.WaitForSpaceAsync();
                 var folder = e.Args.SkipWhile(a => a != "--check-taskbar").Skip(1).FirstOrDefault() ?? "artifacts/validation";
-                var valid = _taskbar.WriteVerification(folder);
+                var valid = await _taskbar.WriteVerificationAsync(folder, _tray.IsVisible);
                 IsExiting = true; Shutdown(valid ? 0 : 1);
                 return;
             }
@@ -133,7 +146,7 @@ public partial class App : Application
             var log = Path.Combine(AppContext.BaseDirectory, "startup-error.log");
             try { File.WriteAllText(log, exception.ToString()); }
             catch (Exception loggingException) when (loggingException is IOException or UnauthorizedAccessException) { }
-            if (!e.Args.Any(a => a is "--smoke-test" or "--check-presentation" or "--check-taskbar" or "--check-startup" or "--check-menu" or "--check-background")) MessageBox.Show(exception.Message, Strings.Current["StartupError"], MessageBoxButton.OK, MessageBoxImage.Error);
+            if (!e.Args.Any(a => a is "--check-motion" or "--dashboard-session" or "--smoke-test" or "--check-presentation" or "--check-taskbar" or "--check-startup" or "--check-menu" or "--check-background")) MessageBox.Show(exception.Message, Strings.Current["StartupError"], MessageBoxButton.OK, MessageBoxImage.Error);
             IsExiting = true;
             Shutdown(1);
         }
@@ -150,21 +163,16 @@ public partial class App : Application
     public void ShowDashboard()
     {
         if (_viewModel is null || IsExiting) return;
-        if (_dashboard is null)
-        {
-            _dashboard = new(_viewModel);
-            _dashboard.Closed += DashboardClosed;
-            MainWindow = _dashboard;
-        }
-        _dashboard.Show(); _dashboard.WindowState = WindowState.Normal; _dashboard.Activate();
+        if (_dashboardSession?.IsRunning == true) { _dashboardSession.Activate(); return; }
+        _dashboardSession?.Dispose();
+        _dashboardSession = new(_viewModel, Dispatcher, _lifetime.Token,
+            session => { if (ReferenceEquals(_dashboardSession, session)) _dashboardSession = null; }, ExitApplication);
     }
-    private void DashboardClosed(object? sender, EventArgs e)
+    public void ExitApplication()
     {
-        if (sender is Dashboard dashboard) dashboard.Closed -= DashboardClosed;
-        _dashboard = null;
-        MainWindow = null;
+        if (_dashboardClient is not null) { _dashboardClient.ExitApplication(); return; }
+        IsExiting = true; Shutdown();
     }
-    public void ExitApplication() { IsExiting = true; Shutdown(); }
     private nint WindowMessage(nint handle, int message, nint wParam, nint lParam, ref bool handled)
     {
         if (message == 0x0219 && _deviceDebounce is not null) { _deviceDebounce.Stop(); _deviceDebounce.Start(); }
@@ -191,6 +199,7 @@ public partial class App : Application
     {
         IsExiting = true;
         _lifetime.Cancel(); _timer?.Stop(); _deviceDebounce?.Stop();
+        _dashboardSession?.Dispose();
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _activationWait?.Unregister(null); _activation?.Dispose();
         _messageSource?.Dispose(); _taskbar?.Dispose(); _tray?.Dispose(); _instance?.Dispose();

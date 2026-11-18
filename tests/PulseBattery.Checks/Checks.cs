@@ -220,6 +220,34 @@ internal static class CheckRunner
             store.Save(store.Load() with { StartWithWindows = true });
             Check(new JsonSettingsStore(settingsPath).Load().StartWithWindows == true, "Explicit Windows startup consent is remembered");
             Check(new AppSettings { Language = "unknown" }.Validate().Language == "uk", "Unknown language falls back to Ukrainian");
+            Check(new AppSettings { TaskbarSize = TaskbarIndicatorSize.Standard }.Validate() is { TaskbarScalePercent: 120, TaskbarSpacing: 14 }, "Legacy standard size migrates to slider values");
+            Check(new AppSettings { TaskbarScalePercent = 113, TaskbarSpacing = 7 }.Validate() is
+                { TaskbarCompactScalePercent: 113, TaskbarCompactSpacing: 7, TaskbarLayout: TaskbarLayoutPreference.Horizontal }, "Existing appearance migrates to both profiles without changing the preferred layout");
+            Check(new AppSettings { TaskbarCompactScalePercent = 999, TaskbarCompactSpacing = -5, TaskbarLayout = (TaskbarLayoutPreference)999 }.Validate() is
+                { TaskbarCompactScalePercent: 150, TaskbarCompactSpacing: 0, TaskbarLayout: TaskbarLayoutPreference.Horizontal }, "Compact profile and layout preference are validated");
+            Check(new AppSettings { TaskbarScalePercent = 80, TaskbarSpacing = 10, TaskbarCompactScalePercent = 100, TaskbarCompactSpacing = 8 }.Validate() is
+                { TaskbarScalePercent: 80, TaskbarSpacing: 10, TaskbarCompactScalePercent: 100, TaskbarCompactSpacing: 8 }, "Horizontal and compact profiles keep their independent values");
+            Check(new AppSettings { TaskbarScalePercent = 999, TaskbarSpacing = -5 }.Validate() is { TaskbarScalePercent: 150, TaskbarSpacing: 0 }, "Slider settings are clamped to usable ranges");
+            Check(new AppSettings { TaskbarSize = TaskbarIndicatorSize.Large, TaskbarScalePercent = 113, TaskbarSpacing = 7 }.Validate() is { TaskbarScalePercent: 113, TaskbarSpacing: 7 }, "Custom slider values take precedence over legacy presets");
+            Check(TaskbarLayout.Place(100, 300, 150, 5, []) == new TaskbarPlacement(true, 145, 150), "Indicators use the free space before the tray");
+            Check(!TaskbarLayout.Place(200, 300, 100, 5, []).Fits, "Full taskbar falls back rather than covering app buttons");
+            Check(TaskbarLayout.Place(100, 300, 80, 5, [new TaskbarSpan(250, 295)]) == new TaskbarPlacement(true, 165, 80), "Indicators avoid another native widget near the tray");
+            Check(!TaskbarLayout.Place(180, 300, 80, 5, [new TaskbarSpan(250, 295)]).Fits, "Another widget cannot force indicators over an app button");
+            Check(TaskbarLayout.Place(-1500, -1000, 80, 5, []).Left == -1085, "Taskbar layout supports negative monitor coordinates");
+            Check(TaskbarLayout.Place(100, 210, 100, 5, []).Fits && !TaskbarLayout.Place(100, 209, 100, 5, []).Fits, "The exact fit boundary preserves both safety gaps");
+            Check(TaskbarLayout.Choose(100, 300, 150, 70, 5, []).Mode == TaskbarDisplayMode.Horizontal, "Roomy taskbar prefers horizontal indicators");
+            Check(TaskbarLayout.Choose(200, 300, 150, 70, 5, []).Mode == TaskbarDisplayMode.Stacked, "Tight taskbar stacks percentages above icons before hiding");
+            Check(TaskbarLayout.Choose(230, 300, 150, 70, 5, []).Mode == TaskbarDisplayMode.Hidden, "Indicators hide only when neither readable layout fits");
+            Check(TaskbarLayout.Choose(200, 300, 150, 0, 5, []).Mode == TaskbarDisplayMode.Hidden, "A taskbar too short for two rows cannot select a clipped layout");
+            Check(TaskbarLayout.Choose(100, 300, 150, 70, 5, [new TaskbarSpan(220, 295)]).Mode == TaskbarDisplayMode.Stacked, "Stacked layout also avoids neighboring widgets");
+            Check(TaskbarLayout.Choose(100, 300, 150, 70, 5, [], TaskbarLayoutPreference.Compact).Mode == TaskbarDisplayMode.Stacked, "Explicit compact preference stays compact even with room for a row");
+            Check(TaskbarLayout.Choose(100, 300, 70, 250, 5, [], TaskbarLayoutPreference.Compact).Mode == TaskbarDisplayMode.Hidden, "An oversized compact profile falls back to tray without changing the chosen layout");
+            Check(TaskbarLayout.Choose(200, 300, 150, 70, 5, [], TaskbarLayoutPreference.Horizontal).Mode == TaskbarDisplayMode.Stacked &&
+                TaskbarLayout.Choose(100, 300, 150, 70, 5, [], TaskbarLayoutPreference.Horizontal).Mode == TaskbarDisplayMode.Horizontal, "Automatic compact fallback restores the preferred row when space returns");
+            store.Save(store.Load() with { TaskbarScalePercent = 80, TaskbarSpacing = 10, TaskbarCompactScalePercent = 100, TaskbarCompactSpacing = 8, TaskbarLayout = TaskbarLayoutPreference.Compact });
+            Check(new JsonSettingsStore(settingsPath).Load() is { TaskbarScalePercent: 80, TaskbarSpacing: 10, TaskbarCompactScalePercent: 100, TaskbarCompactSpacing: 8, TaskbarLayout: TaskbarLayoutPreference.Compact }, "Both appearance profiles and the preferred layout survive a cold restart");
+            store.Save(store.Load() with { TaskbarScalePercent = 113, TaskbarSpacing = 7 });
+            Check(new JsonSettingsStore(settingsPath).Load() is { TaskbarScalePercent: 113, TaskbarSpacing: 7 }, "Custom scale and spacing survive a cold settings load");
             File.WriteAllText(settingsPath, "{\"ShowWidget\":true,\"ShowDeviceTrayIcons\":true}");
             Check(store.Load().ShowTaskbarPanel, "Old floating-widget settings enable the new taskbar panel");
             Check(store.Load().DeviceOrder.Length == 0, "Older settings without device order keep the default order");
