@@ -18,7 +18,7 @@
                 <Button Content="×" ToolTip="{loc:Text Hide}" Style="{StaticResource QuietButton}" FontSize="22" Click="HideWindow" Width="40" />
             </StackPanel>
         </Grid>
-        <ScrollViewer x:Name="DeviceScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer x:Name="DeviceScroll" Grid.Row="1" Style="{StaticResource SettingsScrollViewer}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
         <Grid Margin="34,22,34,18">
             <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
             <Grid>
@@ -70,53 +70,79 @@
             </Border>
             <Border Grid.Row="3" Background="#18231C" BorderBrush="#2B3A2F" BorderThickness="1" CornerRadius="12" Padding="17,14" Margin="0,4,0,0">
                 <Grid><StackPanel Orientation="Horizontal"><TextBlock Text="✓" FontSize="18" Foreground="{StaticResource AccentBrush}" Margin="0,0,12,0" /><StackPanel><TextBlock Text="{Binding Health}" FontSize="12" /><TextBlock Text="{Binding RefreshHint}" FontSize="10" Foreground="{StaticResource MutedBrush}" Margin="0,4,0,0" /></StackPanel></StackPanel>
-                    <Button Content="{loc:Text TaskbarButton}" Click="ToggleTaskbarPanel" Style="{StaticResource QuietButton}" HorizontalAlignment="Right" FontSize="11" />
                 </Grid>
             </Border>
-            <TextBlock Grid.Row="4" Text="{Binding Error}" Visibility="{Binding HasError, Converter={StaticResource BoolVisibility}}" Foreground="#FFAC99" TextWrapping="Wrap" Margin="0,12,0,0" />
+            <Border Grid.Row="4" Visibility="{Binding HasError, Converter={StaticResource BoolVisibility}}" Background="#29221B" BorderBrush="#574331" BorderThickness="1" CornerRadius="10" Padding="13,10" Margin="0,12,0,0">
+                <StackPanel><TextBlock Text="{Binding ErrorSummary}" Foreground="#E7CCAE" TextWrapping="Wrap" />
+                    <TextBlock Text="{loc:Text ErrorDetails}" ToolTip="{Binding Error}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,5,0,0" />
+                </StackPanel>
+            </Border>
         </Grid>
         </ScrollViewer>
         <Border Grid.Row="2" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,1,0,0" Padding="34,0">
             <Grid><TextBlock Text="{Binding Status}" FontSize="10" Foreground="{StaticResource MutedBrush}" /><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><TextBlock Text="{loc:Text BackgroundStatus}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,0,18,0" /><Button Content="{loc:Text Exit}" Click="ExitApp" Style="{StaticResource QuietButton}" FontSize="10" /></StackPanel></Grid>
         </Border>
-        <Border Grid.Row="1" Width="345" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,8,22,0" Padding="22" Background="#202923" BorderBrush="#415047" BorderThickness="1" CornerRadius="14" Visibility="{Binding SettingsOpen, Converter={StaticResource BoolVisibility}}">
-            <ScrollViewer x:Name="SettingsScroll" Style="{StaticResource SettingsScrollViewer}" AutomationProperties.AutomationId="SettingsScroll">
-            <StackPanel><Grid><TextBlock Text="{loc:Text Settings}" FontSize="20" FontWeight="SemiBold" /><Button Content="×" Click="ToggleSettings" HorizontalAlignment="Right" Style="{StaticResource QuietButton}" Padding="6,4" /></Grid>
-                <TextBlock Text="{loc:Text Language}" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,6" />
-                <ComboBox x:Name="LanguageSelector" ItemsSource="{Binding Languages}" DisplayMemberPath="Name" SelectedValuePath="Code" SelectedValue="{Binding Language}" Padding="8,5" Foreground="Black" AutomationProperties.AutomationId="LanguageSelector">
-                    <ComboBox.ItemContainerStyle><Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="Black" /><Setter Property="Background" Value="White" /><Setter Property="Padding" Value="8,6" /></Style></ComboBox.ItemContainerStyle>
-                </ComboBox>
-                <TextBlock Text="{loc:Text PulseTrayHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,12,0,0" />
-                <TextBlock Text="{loc:Text TaskbarLayout}" Margin="0,14,0,6" FontWeight="SemiBold" />
-                <Grid Margin="0,0,0,4"><TextBlock Text="{loc:Text TaskbarHorizontal}" /><TextBlock Text="{loc:Text TaskbarCompact}" HorizontalAlignment="Right" /></Grid>
-                <Slider x:Name="TaskbarLayoutSlider" Value="{Binding TaskbarLayoutMode}" Minimum="0" Maximum="1" TickFrequency="1" IsSnapToTickEnabled="True" SmallChange="1" LargeChange="1" IsMoveToPointEnabled="True" AutomationProperties.AutomationId="TaskbarLayout" AutomationProperties.Name="{loc:Text TaskbarLayout}" />
-                <TextBlock Text="{loc:Text TaskbarLayoutHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,6,0,2" />
-                <Border BorderBrush="#415047" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,8,0,0"><StackPanel>
-                <TextBlock Text="{loc:Text TaskbarHorizontal}" FontWeight="SemiBold" />
-                <TextBlock Text="{loc:Text TaskbarHorizontalHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,3,0,0" />
-                <TextBlock Text="{loc:Text IndicatorScale}" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,6" />
-                <DockPanel><TextBlock Text="{Binding TaskbarScalePercent, StringFormat={}{0}%}" DockPanel.Dock="Right" Width="42" TextAlignment="Right" /><Slider x:Name="TaskbarScaleSlider" Value="{Binding TaskbarScalePercent}" Minimum="80" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" AutomationProperties.AutomationId="TaskbarScale" AutomationProperties.Name="{loc:Text TaskbarSize}" /></DockPanel>
-                <TextBlock Text="{loc:Text TaskbarSpacing}" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,6" />
-                <DockPanel><TextBlock Text="{Binding TaskbarSpacing}" DockPanel.Dock="Right" Width="42" TextAlignment="Right" /><Slider x:Name="TaskbarSpacingSlider" Value="{Binding TaskbarSpacing}" Minimum="0" Maximum="24" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" AutomationProperties.AutomationId="TaskbarSpacing" AutomationProperties.Name="{loc:Text TaskbarSpacing}" /></DockPanel>
-                </StackPanel></Border>
-                <Border BorderBrush="#415047" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,8,0,0"><StackPanel>
-                <TextBlock Text="{loc:Text TaskbarCompact}" FontWeight="SemiBold" />
-                <TextBlock Text="{loc:Text TaskbarCompactHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,3,0,0" />
-                <TextBlock Text="{loc:Text IndicatorScale}" Foreground="{StaticResource MutedBrush}" Margin="0,10,0,6" />
-                <DockPanel><TextBlock Text="{Binding TaskbarCompactScalePercent, StringFormat={}{0}%}" DockPanel.Dock="Right" Width="42" TextAlignment="Right" /><Slider x:Name="TaskbarCompactScaleSlider" Value="{Binding TaskbarCompactScalePercent}" Minimum="80" Maximum="150" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" AutomationProperties.AutomationId="TaskbarCompactScale" AutomationProperties.Name="{loc:Text TaskbarSize}" /></DockPanel>
-                <TextBlock Text="{loc:Text TaskbarSpacing}" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,6" />
-                <DockPanel><TextBlock Text="{Binding TaskbarCompactSpacing}" DockPanel.Dock="Right" Width="42" TextAlignment="Right" /><Slider x:Name="TaskbarCompactSpacingSlider" Value="{Binding TaskbarCompactSpacing}" Minimum="0" Maximum="24" TickFrequency="1" IsSnapToTickEnabled="True" VerticalAlignment="Center" AutomationProperties.AutomationId="TaskbarCompactSpacing" AutomationProperties.Name="{loc:Text TaskbarSpacing}" /></DockPanel>
-                </StackPanel></Border>
-                <TextBlock Text="{loc:Text RefreshSeconds}" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,6" />
-                <DockPanel><TextBlock Text="{Binding RefreshSeconds}" DockPanel.Dock="Right" Width="35" TextAlignment="Right" /><Slider Value="{Binding RefreshSeconds}" Minimum="15" Maximum="300" TickFrequency="15" IsSnapToTickEnabled="True" VerticalAlignment="Center" /></DockPanel>
-                <TextBlock Text="{loc:Text LowThreshold}" Foreground="{StaticResource MutedBrush}" Margin="0,14,0,6" />
-                <DockPanel><TextBlock Text="{Binding LowBatteryThreshold}" DockPanel.Dock="Right" Width="35" TextAlignment="Right" /><Slider Value="{Binding LowBatteryThreshold}" Minimum="5" Maximum="40" TickFrequency="5" IsSnapToTickEnabled="True" VerticalAlignment="Center" /></DockPanel>
-                <CheckBox Content="{loc:Text Notifications}" IsChecked="{Binding Notifications}" Margin="0,16,0,0" />
-                <CheckBox Content="{loc:Text TaskbarSetting}" IsChecked="{Binding TaskbarPanel}" Margin="0,8,0,0" />
-                <CheckBox Content="{loc:Text StartWithWindows}" IsChecked="{Binding StartWithWindows}" Margin="0,8,0,0" />
-                <TextBlock Text="{loc:Text AutoSave}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,12,0,0" />
-            </StackPanel>
-            </ScrollViewer>
+        <Border x:Name="SettingsPanel" Grid.Row="1" Width="376" HorizontalAlignment="Right" Margin="0,8,18,10" Padding="20"
+                Background="#172019" BorderBrush="#3B4F41" BorderThickness="1" CornerRadius="16" Visibility="{Binding SettingsOpen, Converter={StaticResource BoolVisibility}}">
+            <Grid><Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <Grid Margin="0,0,0,15">
+                    <StackPanel><TextBlock Text="{loc:Text Settings}" FontSize="19" FontWeight="SemiBold" />
+                        <TextBlock Text="{loc:Text SettingsHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,4,0,0" /></StackPanel>
+                    <Button Content="×" Click="ToggleSettings" HorizontalAlignment="Right" VerticalAlignment="Top" Style="{StaticResource QuietButton}" Padding="6,2" FontSize="20" ToolTip="{loc:Text CloseSettings}" />
+                </Grid>
+                <ScrollViewer x:Name="SettingsScroll" Grid.Row="1" Style="{StaticResource SettingsScrollViewer}" AutomationProperties.AutomationId="SettingsScroll">
+                <StackPanel Margin="0,0,2,4">
+                    <TextBlock Text="{loc:Text Language}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,0,0,7" />
+                    <ComboBox x:Name="LanguageSelector" Style="{StaticResource SettingsLanguageSelector}" ItemsSource="{Binding Languages}" DisplayMemberPath="Name"
+                              SelectedValuePath="Code" SelectedValue="{Binding Language}" AutomationProperties.AutomationId="LanguageSelector" AutomationProperties.Name="{loc:Text Language}" />
+                    <TextBlock Text="{loc:Text TaskbarLayout}" Margin="0,20,0,9" FontWeight="SemiBold" />
+                    <Border Background="#101813" CornerRadius="10" Padding="3" BorderBrush="#2F4135" BorderThickness="1">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <RadioButton x:Name="HorizontalLayoutChoice" GroupName="IndicatorLayout" Content="{loc:Text TaskbarHorizontal}" Style="{StaticResource LayoutChoice}"
+                                         IsChecked="{Binding IsHorizontalLayout}" AutomationProperties.AutomationId="TaskbarLayout.Horizontal" />
+                            <RadioButton x:Name="CompactLayoutChoice" Grid.Column="1" GroupName="IndicatorLayout" Content="{loc:Text TaskbarCompact}" Style="{StaticResource LayoutChoice}"
+                                         IsChecked="{Binding IsCompactLayout}" AutomationProperties.AutomationId="TaskbarLayout.Compact" />
+                        </Grid>
+                    </Border>
+                    <TextBlock Text="{loc:Text TaskbarLayoutShortHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" TextWrapping="Wrap" Margin="0,7,0,2" />
+                    <Border Background="#1C2820" BorderBrush="#314338" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,11,0,0" Visibility="{Binding IsHorizontalLayout, Converter={StaticResource BoolVisibility}}">
+                        <StackPanel>
+                            <TextBlock Text="{loc:Text TaskbarHorizontal}" FontWeight="SemiBold" FontSize="12" />
+                            <TextBlock Text="{loc:Text TaskbarHorizontalHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,3,0,10" />
+                            <TextBlock Text="{loc:Text IndicatorScale}" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                            <controls:NumericSlider x:Name="TaskbarScaleSlider" Value="{Binding TaskbarScalePercent, Mode=TwoWay}" Minimum="80" Maximum="150" Unit="%" LargeChange="10"
+                                                    AutomationProperties.AutomationId="TaskbarScale" AutomationProperties.Name="{loc:Text TaskbarSize}" />
+                            <TextBlock Text="{loc:Text TaskbarSpacing}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,7,0,0" />
+                            <controls:NumericSlider x:Name="TaskbarSpacingSlider" Value="{Binding TaskbarSpacing, Mode=TwoWay}" Minimum="0" Maximum="24" Unit="px"
+                                                    AutomationProperties.AutomationId="TaskbarSpacing" AutomationProperties.Name="{loc:Text TaskbarSpacing}" />
+                        </StackPanel>
+                    </Border>
+                    <Border Background="#1C2820" BorderBrush="#314338" BorderThickness="1" CornerRadius="10" Padding="12" Margin="0,11,0,0" Visibility="{Binding IsCompactLayout, Converter={StaticResource BoolVisibility}}">
+                        <StackPanel>
+                            <TextBlock Text="{loc:Text TaskbarCompact}" FontWeight="SemiBold" FontSize="12" />
+                            <TextBlock Text="{loc:Text TaskbarCompactHint}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,3,0,10" />
+                            <TextBlock Text="{loc:Text IndicatorScale}" Foreground="{StaticResource MutedBrush}" FontSize="11" />
+                            <controls:NumericSlider x:Name="TaskbarCompactScaleSlider" Value="{Binding TaskbarCompactScalePercent, Mode=TwoWay}" Minimum="80" Maximum="150" Unit="%" LargeChange="10"
+                                                    AutomationProperties.AutomationId="TaskbarCompactScale" AutomationProperties.Name="{loc:Text TaskbarSize}" />
+                            <TextBlock Text="{loc:Text TaskbarSpacing}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,7,0,0" />
+                            <controls:NumericSlider x:Name="TaskbarCompactSpacingSlider" Value="{Binding TaskbarCompactSpacing, Mode=TwoWay}" Minimum="0" Maximum="24" Unit="px"
+                                                    AutomationProperties.AutomationId="TaskbarCompactSpacing" AutomationProperties.Name="{loc:Text TaskbarSpacing}" />
+                        </StackPanel>
+                    </Border>
+                    <TextBlock Text="{loc:Text RefreshSeconds}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,18,0,0" />
+                    <controls:NumericSlider x:Name="RefreshSecondsSlider" Value="{Binding RefreshSeconds, Mode=TwoWay}" Minimum="15" Maximum="300" Unit="{loc:Text SecondsUnit}" LargeChange="15"
+                                            AutomationProperties.AutomationId="RefreshSeconds" AutomationProperties.Name="{loc:Text RefreshSeconds}" />
+                    <TextBlock Text="{loc:Text LowThreshold}" Foreground="{StaticResource MutedBrush}" FontSize="11" Margin="0,9,0,0" />
+                    <controls:NumericSlider x:Name="LowBatterySlider" Value="{Binding LowBatteryThreshold, Mode=TwoWay}" Minimum="5" Maximum="40" Unit="%"
+                                            AutomationProperties.AutomationId="LowBatteryThreshold" AutomationProperties.Name="{loc:Text LowThreshold}" />
+                    <Border Height="1" Background="#304035" Margin="0,18,0,5" />
+                    <CheckBox Content="{loc:Text Notifications}" IsChecked="{Binding Notifications}" FontSize="12" Margin="0,12,0,0" />
+                    <CheckBox Content="{loc:Text TaskbarSetting}" IsChecked="{Binding TaskbarPanel}" FontSize="12" Margin="0,12,0,0" />
+                    <CheckBox Content="{loc:Text StartWithWindows}" IsChecked="{Binding StartWithWindows}" FontSize="12" Margin="0,12,0,0" />
+                    <TextBlock Text="{loc:Text AutoSave}" Foreground="{StaticResource MutedBrush}" FontSize="10" Margin="0,16,0,0" />
+                </StackPanel>
+                </ScrollViewer>
+            </Grid>
         </Border>
     </Grid>
     </Border>

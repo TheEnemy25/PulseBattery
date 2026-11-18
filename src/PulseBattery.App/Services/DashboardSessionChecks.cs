@@ -38,9 +38,9 @@ internal static class DashboardSessionChecks
                 var spacing = (RangeValuePattern)Find(window, "TaskbarSpacing").GetCurrentPattern(RangeValuePattern.Pattern);
                 foreach (var value in new[] { 80, 103, 140, 150 }) scale.SetValue(value);
                 foreach (var value in new[] { 0, 2, 15, 24 }) spacing.SetValue(value);
+                ((SelectionItemPattern)Find(window, "TaskbarLayout.Compact").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
                 ((RangeValuePattern)Find(window, "TaskbarCompactScale").GetCurrentPattern(RangeValuePattern.Pattern)).SetValue(100);
                 ((RangeValuePattern)Find(window, "TaskbarCompactSpacing").GetCurrentPattern(RangeValuePattern.Pattern)).SetValue(8);
-                ((RangeValuePattern)Find(window, "TaskbarLayout").GetCurrentPattern(RangeValuePattern.Pattern)).SetValue(1);
                 var selector = Find(window, "LanguageSelector");
                 ((ExpandCollapsePattern)selector.GetCurrentPattern(ExpandCollapsePattern.Pattern)).Expand();
                 var choices = selector.FindAll(TreeScope.Descendants,
@@ -59,6 +59,7 @@ internal static class DashboardSessionChecks
             samples["MonitorChangesReachWindow"] = await Task.Run(() =>
             {
                 var window = AutomationElement.FromHandle(handle);
+                ((SelectionItemPattern)Find(window, "TaskbarLayout.Horizontal").GetCurrentPattern(SelectionItemPattern.Pattern)).Select();
                 return ((RangeValuePattern)Find(window, "TaskbarScale").GetCurrentPattern(RangeValuePattern.Pattern)).Current.Value == 127 &&
                     ((RangeValuePattern)Find(window, "TaskbarSpacing").GetCurrentPattern(RangeValuePattern.Pattern)).Current.Value == 17;
             });

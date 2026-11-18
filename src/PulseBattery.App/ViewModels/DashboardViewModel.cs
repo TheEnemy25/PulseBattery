@@ -26,7 +26,8 @@ public sealed class DashboardViewModel : ObservableObject
     public string RefreshLabel => Strings.Current[IsBusy ? "Reading" : "RefreshButton"];
     public bool SettingsOpen { get => _settingsOpen; set => Set(ref _settingsOpen, value); }
     public string Status => _lastRefresh.HasValue ? Strings.Current.Format("UpdatedAt", _lastRefresh.Value) : Strings.Current["Searching"];
-    public string Error { get => Strings.Current.TranslateDetail(_error); private set { Set(ref _error, value); Changed(nameof(HasError)); } }
+    public string Error { get => Strings.Current.TranslateDetail(_error); private set { Set(ref _error, value); Changed(nameof(HasError)); Changed(nameof(ErrorSummary)); } }
+    public string ErrorSummary => _error.Contains("BatteryProvider:", StringComparison.Ordinal) ? Strings.Current["DeviceReadErrorSummary"] : Error;
     public bool HasError => Error.Length > 0;
     public bool IsEmpty => !IsBusy && Devices.Count == 0;
     public string DeviceCount => Strings.Current.Format("DeviceCount", Devices.Count);
@@ -77,9 +78,11 @@ public sealed class DashboardViewModel : ObservableObject
         {
             var mode = value == 1 ? TaskbarLayoutPreference.Compact : TaskbarLayoutPreference.Horizontal;
             if (_settings.TaskbarLayout == mode) return;
-            _settings = _settings with { TaskbarLayout = mode }; Changed(); Save();
+            _settings = _settings with { TaskbarLayout = mode }; Changed(); Changed(nameof(IsHorizontalLayout)); Changed(nameof(IsCompactLayout)); Save();
         }
     }
+    public bool IsHorizontalLayout { get => TaskbarLayoutMode == 0; set { if (value) TaskbarLayoutMode = 0; } }
+    public bool IsCompactLayout { get => TaskbarLayoutMode == 1; set { if (value) TaskbarLayoutMode = 1; } }
     public int TaskbarCompactScalePercent
     {
         get => _settings.TaskbarCompactScalePercent ?? 100;
@@ -279,7 +282,7 @@ public sealed class DashboardViewModel : ObservableObject
         if (previous.StartWithWindows != _settings.StartWithWindows) { Changed(nameof(StartWithWindows)); Changed(nameof(NeedsStartupChoice)); }
         if (previous.TaskbarScalePercent != _settings.TaskbarScalePercent) Changed(nameof(TaskbarScalePercent));
         if (previous.TaskbarSpacing != _settings.TaskbarSpacing) Changed(nameof(TaskbarSpacing));
-        if (previous.TaskbarLayout != _settings.TaskbarLayout) Changed(nameof(TaskbarLayoutMode));
+        if (previous.TaskbarLayout != _settings.TaskbarLayout) { Changed(nameof(TaskbarLayoutMode)); Changed(nameof(IsHorizontalLayout)); Changed(nameof(IsCompactLayout)); }
         if (previous.TaskbarCompactScalePercent != _settings.TaskbarCompactScalePercent) Changed(nameof(TaskbarCompactScalePercent));
         if (previous.TaskbarCompactSpacing != _settings.TaskbarCompactSpacing) Changed(nameof(TaskbarCompactSpacing));
         if (previous.TaskbarCompactScalePercent != _settings.TaskbarCompactScalePercent || previous.TaskbarCompactSpacing != _settings.TaskbarCompactSpacing)

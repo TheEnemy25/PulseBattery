@@ -11,6 +11,8 @@ using PulseBattery.Core;
 using PulseBattery.App.Localization;
 using System.Windows.Controls;
 using System.Windows.Automation;
+using System.Windows.Controls.Primitives;
+using System.Windows.Input;
 
 namespace PulseBattery.App.Services;
 
@@ -171,17 +173,18 @@ internal static class PresentationChecks
             var mode = spacing == 0 ? 0 : 1;
             dashboard.TaskbarCompactScaleSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)compactScale);
             dashboard.TaskbarCompactSpacingSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)compactSpacing);
-            dashboard.TaskbarLayoutSlider.SetCurrentValue(System.Windows.Controls.Primitives.RangeBase.ValueProperty, (double)mode);
+            (mode == 1 ? dashboard.CompactLayoutChoice : dashboard.HorizontalLayoutChoice)
+                .SetCurrentValue(System.Windows.Controls.Primitives.ToggleButton.IsCheckedProperty, true);
             foreach (var language in new[] { "en", "uk", "en" })
             {
                 await SetSelection(dashboard.LanguageSelector, language);
                 var selectionMatches = dashboard.TaskbarScaleSlider.Value == scale && dashboard.TaskbarSpacingSlider.Value == spacing &&
                     dashboard.TaskbarCompactScaleSlider.Value == compactScale && dashboard.TaskbarCompactSpacingSlider.Value == compactSpacing &&
-                    dashboard.TaskbarLayoutSlider.Value == mode;
+                    dashboard.CompactLayoutChoice.IsChecked == (mode == 1) && dashboard.HorizontalLayoutChoice.IsChecked == (mode == 0);
                 var labelsVisible = VisualChildren<TextBlock>(dashboard).Any(text => text.Text == Strings.Current["TaskbarSpacing"]);
                 var noValidationErrors = !Validation.GetHasError(dashboard.TaskbarScaleSlider) && !Validation.GetHasError(dashboard.TaskbarSpacingSlider) &&
                     !Validation.GetHasError(dashboard.TaskbarCompactScaleSlider) && !Validation.GetHasError(dashboard.TaskbarCompactSpacingSlider) &&
-                    !Validation.GetHasError(dashboard.TaskbarLayoutSlider);
+                    !Validation.GetHasError(dashboard.CompactLayoutChoice) && !Validation.GetHasError(dashboard.HorizontalLayoutChoice);
                 var saved = settings.Load();
                 var settingsPreserved = saved.TaskbarSpacing == spacing && saved.TaskbarScalePercent == scale && saved.Language == language &&
                     model.TaskbarSpacing == spacing && model.TaskbarScalePercent == scale &&
@@ -193,6 +196,7 @@ internal static class PresentationChecks
                     NoValidationErrors = noValidationErrors, SavedSettingsPreserved = settingsPreserved });
             }
         }
+        passed &= await CheckSettingsControlsAsync(dashboard, model, settings, folder);
         Render((Visual)dashboard.Content, 960, 690, Path.Combine(folder, "settings-language-switch.png"));
         model.TaskbarSpacing = originalSpacing;
         model.TaskbarScalePercent = originalScale;
@@ -203,6 +207,82 @@ internal static class PresentationChecks
         File.WriteAllText(Path.Combine(folder, "settings-language-checks.json"), JsonSerializer.Serialize(new
         { Passed = passed, Samples = samples }, new JsonSerializerOptions { WriteIndented = true }));
         dashboard.Close();
+        return passed;
+    }
+    private static async Task<bool> CheckSettingsControlsAsync(Dashboard dashboard, DashboardViewModel model, MemorySettings settings, string folder)
+    {
+        var original = model.Settings;
+        var samples = new List<object>();
+        var passed = true;
+        async Task Idle()
+        {
+            await dashboard.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            dashboard.UpdateLayout();
+        }
+        void Key(TextBox editor, Key key) => editor.RaiseEvent(new KeyEventArgs(Keyboard.PrimaryDevice,
+            PresentationSource.FromVisual(editor), 0, key) { RoutedEvent = Keyboard.PreviewKeyDownEvent });
+        var sliders = new (NumericSlider Slider, int Mode, int Sample, Func<AppSettings, int?> Saved)[]
+        {
+            (dashboard.TaskbarScaleSlider, 0, 123, s => s.TaskbarScalePercent),
+            (dashboard.TaskbarSpacingSlider, 0, 13, s => s.TaskbarSpacing),
+            (dashboard.TaskbarCompactScaleSlider, 1, 117, s => s.TaskbarCompactScalePercent),
+            (dashboard.TaskbarCompactSpacingSlider, 1, 9, s => s.TaskbarCompactSpacing),
+            (dashboard.RefreshSecondsSlider, 1, 73, s => s.RefreshSeconds),
+            (dashboard.LowBatterySlider, 1, 23, s => s.LowBatteryThreshold)
+        };
+        foreach (var (slider, mode, sample, saved) in sliders)
+        {
+            model.TaskbarLayoutMode = mode;
+            await Idle();
+            slider.BringIntoView();
+            await Idle();
+            slider.ApplyTemplate();
+            var editor = slider.ValueEditor!;
+            editor.Focus(); editor.Text = sample.ToString(); Key(editor, System.Windows.Input.Key.Enter);
+            await Idle();
+            var typedAndSaved = slider.Value == sample && saved(settings.Load()) == sample;
+            editor.Focus(); editor.Text = "9999"; Key(editor, System.Windows.Input.Key.Enter);
+            var clamped = slider.Value == slider.Maximum && editor.Text == ((int)slider.Maximum).ToString();
+            editor.Focus(); editor.Text = ""; Key(editor, System.Windows.Input.Key.Enter);
+            var emptyReverts = slider.Value == slider.Maximum && editor.Text == ((int)slider.Maximum).ToString();
+            editor.Focus(); editor.Text = sample.ToString(); dashboard.LanguageSelector.Focus();
+            var blurSaves = slider.Value == sample && saved(settings.Load()) == sample;
+            editor.Focus(); editor.Text = "1"; Key(editor, System.Windows.Input.Key.Escape);
+            var escapeReverts = slider.Value == sample && editor.Text == sample.ToString();
+            slider.SetCurrentValue(RangeBase.ValueProperty, slider.Minimum);
+            await Idle();
+            var sliderUpdatesEditor = editor.Text == ((int)slider.Minimum).ToString();
+            var track = (Track)slider.Template.FindName("PART_Track", slider);
+            var positions = new[] { .15, .5, .85 }.Select(x => track.ValueFromPoint(new Point(track.ActualWidth * x, track.ActualHeight / 2))).ToArray();
+            var fullTrack = slider.IsMoveToPointEnabled && track.ActualWidth > 100 && positions[0] < positions[1] && positions[1] < positions[2] &&
+                new[] { .15, .5, .85 }.All(x => track.InputHitTest(new Point(track.ActualWidth * x, 4)) is not null);
+            var valid = typedAndSaved && clamped && emptyReverts && blurSaves && escapeReverts && sliderUpdatesEditor && fullTrack;
+            passed &= valid;
+            samples.Add(new { Control = AutomationProperties.GetAutomationId(slider), TypedAndSaved = typedAndSaved, Clamped = clamped,
+                EmptyReverts = emptyReverts, BlurSaves = blurSaves, EscapeReverts = escapeReverts, SliderUpdatesEditor = sliderUpdatesEditor, FullTrackClickable = fullTrack });
+        }
+        model.ApplyDashboardSettings(original with { TaskbarScalePercent = 110, TaskbarSpacing = 10,
+            TaskbarCompactScalePercent = 120, TaskbarCompactSpacing = 14, RefreshSeconds = 60, LowBatteryThreshold = 20 });
+        model.Language = "uk"; model.TaskbarLayoutMode = 0; dashboard.SettingsScroll.ScrollToTop();
+        await Idle();
+        Render((Visual)dashboard.Content, 960, 690, Path.Combine(folder, "settings-redesign-uk.png"));
+        dashboard.LanguageSelector.IsDropDownOpen = true;
+        await Idle();
+        var popup = (Popup)dashboard.LanguageSelector.Template.FindName("PART_Popup", dashboard.LanguageSelector);
+        var dropdownOpens = popup.IsOpen && dashboard.LanguageSelector.Items.Count == 2 && popup.Child is FrameworkElement { ActualHeight: > 40 };
+        if (popup.Child is FrameworkElement child) Render(child, (int)Math.Ceiling(child.ActualWidth), (int)Math.Ceiling(child.ActualHeight), Path.Combine(folder, "settings-language-dropdown.png"));
+        dashboard.LanguageSelector.IsDropDownOpen = false;
+        model.Language = "en"; model.TaskbarLayoutMode = 1;
+        dashboard.SettingsScroll.ScrollToBottom(); await Idle();
+        Render((Visual)dashboard.Content, 960, 690, Path.Combine(folder, "settings-redesign-en.png"));
+        var oldButtonRemoved = !VisualChildren<Button>(dashboard).Any(button => Equals(button.Content, Strings.Current["TaskbarButton"]));
+        model.ApplyDashboardState(model.Settings, model.Devices.Select(device => device.Device).ToArray(), false, "WindowsBatteryProvider: The handle is invalid.", DateTime.Now);
+        var friendlyError = model.ErrorSummary == Strings.Current["DeviceReadErrorSummary"] && model.Error.Contains("WindowsBatteryProvider:", StringComparison.Ordinal);
+        model.ApplyDashboardState(original, model.Devices.Select(device => device.Device).ToArray(), false, "", DateTime.Now);
+        dashboard.SettingsScroll.ScrollToTop(); await Idle();
+        passed &= dropdownOpens && oldButtonRemoved && friendlyError;
+        File.WriteAllText(Path.Combine(folder, "settings-control-checks.json"), JsonSerializer.Serialize(new
+        { Passed = passed, DropdownOpens = dropdownOpens, OldButtonRemoved = oldButtonRemoved, FriendlyError = friendlyError, Samples = samples }, new JsonSerializerOptions { WriteIndented = true }));
         return passed;
     }
     private static IEnumerable<T> VisualChildren<T>(DependencyObject parent) where T : DependencyObject
