@@ -16,12 +16,17 @@ $presentation = Start-Process -FilePath $presentationApp -ArgumentList '--check-
 if (-not $presentation.WaitForExit(30000)) { $presentation.Kill(); throw 'Presentation checks timed out.' }
 $presentation.Refresh()
 if ($presentation.ExitCode -ne 0) { throw 'Presentation checks failed. See artifacts/presentation-checks/presentation-checks.json.' }
+$background = Start-Process -FilePath $presentationApp -ArgumentList '--check-background artifacts/background-checks' -WindowStyle Hidden -PassThru
+if (-not $background.WaitForExit(30000)) { $background.Kill(); throw 'Background checks timed out.' }
+$background.Refresh()
+if ($background.ExitCode -ne 0) { throw 'Background checks failed. See artifacts/background-checks/background-checks.json.' }
 if ($SingleFile) {
     $env:NUGET_PACKAGES = Join-Path $PSScriptRoot '.local/nuget/packages'
     $portableOutput = Join-Path $PSScriptRoot 'artifacts/portable/win-x64'
+    # Keep embedded assemblies memory-mappable instead of decompressing them into private RAM.
     dotnet publish src/PulseBattery.App -c Release -r win-x64 --self-contained true -o $portableOutput --nologo `
         -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true `
-        -p:EnableCompressionInSingleFile=true -p:PublishTrimmed=false -p:DebugType=embedded
+        -p:EnableCompressionInSingleFile=false -p:PublishTrimmed=false -p:DebugType=embedded
     if ($LASTEXITCODE -ne 0) { throw 'Single-file publish failed.' }
     $publishedFiles = @(Get-ChildItem -LiteralPath $portableOutput -File)
     if ($publishedFiles.Count -ne 1 -or $publishedFiles[0].Name -ne 'PulseBattery.exe') { throw 'Expected exactly one portable executable.' }

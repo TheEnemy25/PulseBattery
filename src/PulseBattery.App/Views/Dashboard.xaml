@@ -3,8 +3,9 @@
         xmlns:controls="clr-namespace:PulseBattery.App.Controls"
         xmlns:loc="clr-namespace:PulseBattery.App.Localization"
         xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
-        Title="{loc:Text WindowTitle}" Style="{StaticResource {x:Type Window}}" Width="960" Height="690" MinWidth="780" MinHeight="630"
-        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize" Closing="OnClosing" StateChanged="OnStateChanged">
+        Title="{loc:Text WindowTitle}" Style="{DynamicResource {x:Type Window}}" Width="960" Height="690" MinWidth="780" MinHeight="630"
+        WindowStartupLocation="CenterScreen" WindowStyle="None" ResizeMode="CanResize" StateChanged="OnStateChanged">
+    <Window.Resources><ResourceDictionary Source="../Themes/Dark.xaml" /></Window.Resources>
     <shell:WindowChrome.WindowChrome><shell:WindowChrome CaptionHeight="52" CornerRadius="12" ResizeBorderThickness="6" GlassFrameThickness="0" /></shell:WindowChrome.WindowChrome>
     <Border BorderBrush="#303A33" BorderThickness="1">
     <Grid>
@@ -82,16 +83,16 @@
             <ScrollViewer x:Name="SettingsScroll" Style="{StaticResource SettingsScrollViewer}" AutomationProperties.AutomationId="SettingsScroll">
             <StackPanel><Grid><TextBlock Text="{loc:Text Settings}" FontSize="20" FontWeight="SemiBold" /><Button Content="×" Click="ToggleSettings" HorizontalAlignment="Right" Style="{StaticResource QuietButton}" Padding="6,4" /></Grid>
                 <TextBlock Text="{loc:Text Language}" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,6" />
-                <ComboBox ItemsSource="{Binding Languages}" DisplayMemberPath="Name" SelectedValuePath="Code" SelectedValue="{Binding Language}" Padding="8,5" Foreground="Black">
+                <ComboBox x:Name="LanguageSelector" ItemsSource="{Binding Languages}" DisplayMemberPath="Name" SelectedValuePath="Code" SelectedValue="{Binding Language}" Padding="8,5" Foreground="Black">
                     <ComboBox.ItemContainerStyle><Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="Black" /><Setter Property="Background" Value="White" /><Setter Property="Padding" Value="8,6" /></Style></ComboBox.ItemContainerStyle>
                 </ComboBox>
                 <TextBlock Text="{loc:Text PulsePosition}" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,6" />
-                <ComboBox ItemsSource="{Binding PulsePositions}" DisplayMemberPath="Name" SelectedValuePath="IsLeft" SelectedValue="{Binding PulseOnLeft, Mode=TwoWay}" Padding="8,5" Foreground="Black"
+                <ComboBox x:Name="PulsePositionSelector" ItemsSource="{Binding PulsePositions}" DisplayMemberPath="Name" SelectedValuePath="IsLeft" SelectedValue="{Binding PulseOnLeft, Mode=TwoWay}" Padding="8,5" Foreground="Black"
                           AutomationProperties.AutomationId="PulsePosition" AutomationProperties.Name="{loc:Text PulsePosition}">
                     <ComboBox.ItemContainerStyle><Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="Black" /><Setter Property="Background" Value="White" /><Setter Property="Padding" Value="8,6" /></Style></ComboBox.ItemContainerStyle>
                 </ComboBox>
                 <TextBlock Text="{loc:Text TaskbarSize}" Foreground="{StaticResource MutedBrush}" Margin="0,12,0,6" />
-                <ComboBox ItemsSource="{Binding TaskbarSizes}" DisplayMemberPath="Name" SelectedValuePath="Size" SelectedValue="{Binding TaskbarSize, Mode=TwoWay}" Padding="8,5" Foreground="Black"
+                <ComboBox x:Name="TaskbarSizeSelector" ItemsSource="{Binding TaskbarSizes}" DisplayMemberPath="Name" SelectedValuePath="Size" SelectedValue="{Binding TaskbarSize, Mode=TwoWay}" Padding="8,5" Foreground="Black"
                           AutomationProperties.AutomationId="TaskbarSize" AutomationProperties.Name="{loc:Text TaskbarSize}">
                     <ComboBox.ItemContainerStyle><Style TargetType="ComboBoxItem"><Setter Property="Foreground" Value="Black" /><Setter Property="Background" Value="White" /><Setter Property="Padding" Value="8,6" /><Setter Property="AutomationProperties.Name" Value="{Binding Name}" /></Style></ComboBox.ItemContainerStyle>
                 </ComboBox>

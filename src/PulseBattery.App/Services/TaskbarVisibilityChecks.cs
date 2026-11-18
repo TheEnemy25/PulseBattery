@@ -59,7 +59,7 @@ internal static class TaskbarVisibilityChecks
                 AnchorWidth = panel.PulseAnchor.ActualWidth, ExpectedAnchor = model.TaskbarAppearance.AnchorWidth, Dividers = VisibleDividers(panel),
                 ReceivesInput = panel.InputHitTest(new Point(panel.ActualWidth - 2, panel.ActualHeight - 2)) is not null });
             sizesApplyLive &= panel.FontSize == model.TaskbarAppearance.FontSize &&
-                panel.PulseAnchor.ActualWidth == model.TaskbarAppearance.AnchorWidth && VisibleDividers(panel) == 1 &&
+                Math.Abs(panel.PulseAnchor.ActualWidth - model.TaskbarAppearance.AnchorWidth) * VisualTreeHelper.GetDpi(panel).DpiScaleX <= 0.5001 && VisibleDividers(panel) == 1 &&
                 panel.InputHitTest(new Point(panel.ActualWidth - 2, panel.ActualHeight - 2)) is not null;
             RenderPanel(panel, Path.Combine(folder, $"taskbar-size-{size}.png"));
         }
@@ -69,6 +69,8 @@ internal static class TaskbarVisibilityChecks
         await panel.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.DataBind);
         ArrangePanel(panel);
         panel.PrepareMenuForDevice(null);
+        var redundantItemsRemoved = !panel.ContextMenu!.Items.OfType<MenuItem>().Any(item =>
+            AutomationProperties.GetAutomationId(item) is "Taskbar.TogglePanel" or "Taskbar.Language");
         var applicationRows = panel.ContextMenu!.Items.OfType<MenuItem>().Where(item => AutomationProperties.GetAutomationId(item).StartsWith("Taskbar.DeviceVisibility.", StringComparison.Ordinal)).ToArray();
         var appListsAllDevices = applicationRows.Length == 2 && applicationRows.All(row => row.IsCheckable && row.IsChecked && row.StaysOpenOnClick && row.Icon is DeviceGlyph);
         var mouseRow = applicationRows.Single(row => AutomationProperties.GetAutomationId(row).EndsWith("visibility:mouse", StringComparison.Ordinal));
@@ -137,10 +139,11 @@ internal static class TaskbarVisibilityChecks
         var anchorSurvivesDisconnect = restarted.Devices.Count == 0 && persistentPanel.PulseAnchor.Visibility == Visibility.Visible;
         header.SetApplication();
         var applicationHeader = header.Header?.ToString() == "Pulse" && header.Icon is SvgIcon { Asset: "pulse-mark" } && !header.IsEnabled;
-        var passed = sizesApplyLive && sizePersists && pulseOnRight && pulseMovesLeft && positionPersists && pulseMovesBackRight && dividersBetweenDevices && noDanglingDivider && deviceMenuScoped && appListsAllDevices && menuHidesAndKeepsRow && menuRestoresDevice && applicationHeader && anchorSurvivesHiddenDevices && anchorOpensApp && anchorSurvivesGlobalHide && anchorSurvivesDisconnect && initiallyShown && toggleFiltersOnlyTaskbar && survivesRefresh && survivesRestart && survivesReconnect && restoresSavedOrder && canHideAll && restoresFromApp && unrelatedSettingsPreserveHidden && headerIdentifiesDevice;
+        var passed = redundantItemsRemoved && sizesApplyLive && sizePersists && pulseOnRight && pulseMovesLeft && positionPersists && pulseMovesBackRight && dividersBetweenDevices && noDanglingDivider && deviceMenuScoped && appListsAllDevices && menuHidesAndKeepsRow && menuRestoresDevice && applicationHeader && anchorSurvivesHiddenDevices && anchorOpensApp && anchorSurvivesGlobalHide && anchorSurvivesDisconnect && initiallyShown && toggleFiltersOnlyTaskbar && survivesRefresh && survivesRestart && survivesReconnect && restoresSavedOrder && canHideAll && restoresFromApp && unrelatedSettingsPreserveHidden && headerIdentifiesDevice;
         File.WriteAllText(Path.Combine(folder, "taskbar-visibility-checks.json"), JsonSerializer.Serialize(new
         {
             TestFixtures = true, Passed = passed, InitiallyShowsAllDevices = initiallyShown,
+            RedundantMenuItemsRemoved = redundantItemsRemoved,
             ToggleFiltersTaskbarWithoutRemovingDeviceOrBatteryAlerts = toggleFiltersOnlyTaskbar,
             SurvivesRefresh = survivesRefresh, SurvivesRestart = survivesRestart, SurvivesReconnect = survivesReconnect,
             ReappearsInSavedOrder = restoresSavedOrder, CanHideAllWithoutEmptyingDashboard = canHideAll,

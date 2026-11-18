@@ -20,16 +20,13 @@ public partial class TaskbarPanel : UserControl, IDisposable
     private readonly Action _open;
     private readonly MenuItem _iconMenu;
     private readonly MenuItem _hideDevice;
-    private readonly MenuItem _toggleIndicators;
     private readonly MenuItem _dashboardMenu;
     private readonly MenuItem _refreshMenu;
-    private readonly MenuItem _languageMenu;
     private readonly MenuItem _exitMenu;
     private readonly Separator _exitSeparator = new();
     private readonly Dictionary<string, MenuItem> _visibilityRows = new(StringComparer.Ordinal);
     private readonly DeviceMenuHeader _deviceHeader = new();
     private readonly Separator _headerSeparator = new();
-    private readonly Dictionary<string, MenuItem> _languages = [];
     private readonly DeviceKindMenu _kindChoices;
     private DeviceViewModel? _selected;
     private double _horizontalAnchor;
@@ -43,9 +40,6 @@ public partial class TaskbarPanel : UserControl, IDisposable
         var refresh = Item("RefreshMenu", "menu-refresh"); refresh.Command = viewModel.RefreshCommand;
         var exit = Item("Exit", "menu-exit"); exit.Click += (_, _) => ((App)Application.Current).ExitApplication();
         _dashboardMenu = dashboard; _refreshMenu = refresh; _exitMenu = exit;
-        _toggleIndicators = Item("TogglePanel", "menu-appearance"); _toggleIndicators.IsCheckable = true;
-        _toggleIndicators.StaysOpenOnClick = true;
-        _toggleIndicators.Click += (_, _) => viewModel.TaskbarPanel = _toggleIndicators.IsChecked;
         _hideDevice = Item("HideDevice", "menu-eye-off");
         _hideDevice.Click += (_, _) =>
         {
@@ -55,23 +49,14 @@ public partial class TaskbarPanel : UserControl, IDisposable
         };
         _iconMenu = Item("IconMenu", "menu-appearance");
         _kindChoices = new(_iconMenu, kind => { if (_selected is not null) viewModel.SetDeviceKind(_selected.Device.Id, kind); });
-        var language = Item("Language", "menu-language");
-        _languageMenu = language;
-        foreach (var choice in viewModel.Languages)
-        {
-            var item = new MenuItem { Header = choice.Name, IsCheckable = true, Icon = new SvgIcon { Asset = "menu-language" } };
-            item.Click += (_, _) => viewModel.Language = choice.Code;
-            language.Items.Add(item); _languages[choice.Code] = item;
-        }
-        foreach (var parent in new[] { _iconMenu, language })
-            parent.SubmenuOpened += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
+        _iconMenu.SubmenuOpened += (_, _) => Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () =>
             {
-                if (parent.Template.FindName("PART_Popup", parent) is Popup { Child: FrameworkElement child }) _placement.Clamp(child);
+                if (_iconMenu.Template.FindName("PART_Popup", _iconMenu) is Popup { Child: FrameworkElement child }) _placement.Clamp(child);
             });
         _deviceHeader.SetDevice(viewModel.TaskbarDevices.FirstOrDefault());
         _headerSeparator.Visibility = _deviceHeader.Visibility;
         menu.Items.Add(_deviceHeader); menu.Items.Add(_headerSeparator);
-        menu.Items.Add(dashboard); menu.Items.Add(refresh); menu.Items.Add(_iconMenu); menu.Items.Add(_hideDevice); menu.Items.Add(_toggleIndicators); menu.Items.Add(language); menu.Items.Add(_exitSeparator); menu.Items.Add(exit);
+        menu.Items.Add(dashboard); menu.Items.Add(refresh); menu.Items.Add(_iconMenu); menu.Items.Add(_hideDevice); menu.Items.Add(_exitSeparator); menu.Items.Add(exit);
         ContextMenu = menu;
         _placement.Configure(menu, () => _selected is null ? PulseAnchor.TranslatePoint(new Point(PulseAnchor.ActualWidth / 2, 0), this).X : _horizontalAnchor);
         viewModel.DevicesChanged += UpdateOpenMenu;
@@ -95,7 +80,6 @@ public partial class TaskbarPanel : UserControl, IDisposable
         ContextMenu!.IsOpen = true;
     }
     public MenuItem IconSubmenu => _iconMenu;
-    public MenuItem LanguageSubmenu => _languageMenu;
     internal void PrepareMenuForDevice(DeviceViewModel? device) { _selected = device; PrepareMenu(); }
     private void OpenPulse(object sender, RoutedEventArgs e) { _open(); e.Handled = true; }
     public void OpenApplicationMenuAtPointer()
@@ -116,22 +100,18 @@ public partial class TaskbarPanel : UserControl, IDisposable
         menu.Resources["MenuHover"] = new SolidColorBrush(IsLightTheme ? Color.FromRgb(230, 230, 230) : Color.FromRgb(56, 56, 56));
         var deviceMenu = _selected is not null;
         _iconMenu.Visibility = _hideDevice.Visibility = deviceMenu ? Visibility.Visible : Visibility.Collapsed;
-        _toggleIndicators.Visibility = deviceMenu ? Visibility.Collapsed : Visibility.Visible;
-        foreach (var item in new MenuItem[] { _dashboardMenu, _refreshMenu, _languageMenu, _exitMenu })
+        foreach (var item in new MenuItem[] { _dashboardMenu, _refreshMenu, _exitMenu })
             item.Visibility = deviceMenu ? Visibility.Collapsed : Visibility.Visible;
         _exitSeparator.Visibility = deviceMenu ? Visibility.Collapsed : Visibility.Visible;
-        _toggleIndicators.IsChecked = _viewModel.TaskbarPanel;
         if (deviceMenu) _deviceHeader.SetDevice(_selected); else _deviceHeader.SetApplication();
         _headerSeparator.Visibility = _deviceHeader.Visibility;
         DeviceKind? configured = _selected is not null && _viewModel.Settings.DeviceKinds.TryGetValue(_selected.Device.Id, out var kind) ? kind : null;
         _kindChoices.SelectCurrent(configured);
-        foreach (var (code, item) in _languages) item.IsChecked = code == _viewModel.Language;
         SynchronizeVisibilityRows();
     }
     private void UpdateOpenMenu()
     {
         if (ContextMenu?.IsOpen != true || _selected is not null) return;
-        _toggleIndicators.IsChecked = _viewModel.TaskbarPanel;
         SynchronizeVisibilityRows();
         Dispatcher.BeginInvoke(DispatcherPriority.Loaded, () => { if (ContextMenu.IsOpen) _placement.Clamp(ContextMenu); });
     }
@@ -143,7 +123,7 @@ public partial class TaskbarPanel : UserControl, IDisposable
         {
             foreach (var row in _visibilityRows.Values) menu.Items.Remove(row);
             _visibilityRows.Clear();
-            var index = menu.Items.IndexOf(_toggleIndicators) + 1;
+            var index = menu.Items.IndexOf(_exitSeparator);
             foreach (var device in devices)
             {
                 var id = device.Device.Id;

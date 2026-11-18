@@ -158,15 +158,12 @@ public sealed class TaskbarPanelService : IDisposable
             var rows = menu.Items.OfType<MenuItem>().Where(item => AutomationProperties.GetAutomationId(item).StartsWith("Taskbar.DeviceVisibility.", StringComparison.Ordinal)).ToArray();
             var rowsMatch = rows.Length == _viewModel.Devices.Count && rows.Zip(_viewModel.Devices).All(pair => pair.First.IsCheckable && pair.First.IsChecked == pair.Second.ShowOnTaskbar);
             CaptureMenu(folder, "application-menu.png", appBounds, panelBounds);
-            _panel.LanguageSubmenu.IsSubmenuOpen = true;
-            await Task.Delay(150);
             bool SubmenuFits(MenuItem parent)
             {
                 if (parent.Template.FindName("PART_Popup", parent) is not Popup { Child: FrameworkElement child } || PresentationSource.FromVisual(child) is not HwndSource submenu) return false;
                 GetWindowRect(submenu.Handle, out var bounds);
                 return bounds.Bottom <= panelBounds.Top - 4;
             }
-            var languageFits = SubmenuFits(_panel.LanguageSubmenu);
             menu.IsOpen = false;
             // Let WPF detach the previous popup before opening the other menu scope.
             await Task.Delay(100);
@@ -189,12 +186,14 @@ public sealed class TaskbarPanelService : IDisposable
                 await Task.Delay(150);
                 iconFits = SubmenuFits(_panel.IconSubmenu);
             }
-            var passed = exitFits && rowsMatch && languageFits && deviceScoped && iconFits;
+            var removedRedundantItems = !menu.Items.OfType<MenuItem>().Any(item =>
+                AutomationProperties.GetAutomationId(item) is "Taskbar.TogglePanel" or "Taskbar.Language");
+            var passed = exitFits && rowsMatch && removedRedundantItems && deviceScoped && iconFits;
             File.WriteAllText(Path.Combine(folder, "menu-checks.json"), JsonSerializer.Serialize(new
             {
                 Passed = passed, Language = Strings.Current.Language, ApplicationMenuAboveTaskbar = appBounds.Bottom <= panelBounds.Top - 4,
                 ExitFullyVisible = exitFits, DeviceChecklistMatchesVisibility = rowsMatch,
-                DeviceMenuContainsOnlyDeviceActions = deviceScoped, LanguageSubmenuAboveTaskbar = languageFits, IconSubmenuAboveTaskbar = iconFits
+                DeviceMenuContainsOnlyDeviceActions = deviceScoped, RedundantItemsRemoved = removedRedundantItems, IconSubmenuAboveTaskbar = iconFits
             }, new JsonSerializerOptions { WriteIndented = true }));
             return passed;
         }

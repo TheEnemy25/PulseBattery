@@ -106,7 +106,8 @@ internal static class PresentationChecks
         var ukrainianComplete = Strings.Current.Keys.All(k => !string.IsNullOrWhiteSpace(Strings.Current[k]) && !Strings.Current[k].StartsWith('['));
         var formalEarbudName = Strings.Current["KindEarbuds"] == "Навушники-вкладиші";
         var ukrainianGamepad = viewModel.Devices.First(d => d.Device.Id == "test:gamepad").Category == "ГЕЙМПАД" && Strings.Current["KindGamepad"] == "Геймпад";
-        var passed = taskbarVisibilityPassed && startupConsentPassed && deviceOrderPassed && animationChanged && hitArea && darkForeground && lightForeground && distinctIcons && overrideWorks && gamepadOverrideWorks && englishGamepad && ukrainianGamepad && retainedOffline && restoredAfterReconnect && automaticRestored && uniformMenuIcons && menuIconsRender && formalEarbudName && englishLive && ukrainianLive && englishComplete && ukrainianComplete;
+        var settingsLanguagePassed = await CheckSettingsLanguageAsync(dashboard, viewModel, settings, folder);
+        var passed = settingsLanguagePassed && taskbarVisibilityPassed && startupConsentPassed && deviceOrderPassed && animationChanged && hitArea && darkForeground && lightForeground && distinctIcons && overrideWorks && gamepadOverrideWorks && englishGamepad && ukrainianGamepad && retainedOffline && restoredAfterReconnect && automaticRestored && uniformMenuIcons && menuIconsRender && formalEarbudName && englishLive && ukrainianLive && englishComplete && ukrainianComplete;
         viewModel.Language = originalLanguage;
         File.WriteAllText(Path.Combine(folder, "presentation-checks.json"), JsonSerializer.Serialize(new
         {
@@ -122,9 +123,73 @@ internal static class PresentationChecks
             AutomaticSelectionRemovesOverride = automaticRestored, MenuIcons18By18 = uniformMenuIcons,
             AllMenuSvgIconsRender = menuIconsRender, FormalEarbudName = formalEarbudName,
             EnglishSwitchesLive = englishLive, UkrainianSwitchesLive = ukrainianLive,
+            SettingsDropdownsKeepSelectionAcrossLanguages = settingsLanguagePassed,
             BothLanguagesComplete = englishComplete && ukrainianComplete
         }, new JsonSerializerOptions { WriteIndented = true }));
         return passed;
+    }
+    private static async Task<bool> CheckSettingsLanguageAsync(Dashboard dashboard, DashboardViewModel model, MemorySettings settings, string folder)
+    {
+        var originalLanguage = model.Language;
+        var originalPosition = model.PulseOnLeft;
+        var originalSize = model.TaskbarSize;
+        var samples = new List<object>();
+        var passed = true;
+        dashboard.WindowStartupLocation = WindowStartupLocation.Manual;
+        dashboard.Left = -32000; dashboard.Top = -32000;
+        dashboard.ShowInTaskbar = false;
+        dashboard.Show();
+        async Task SetSelection(ComboBox selector, object value)
+        {
+            var choice = selector.Items.Cast<object>().Single(item =>
+                Equals(item.GetType().GetProperty(selector.SelectedValuePath)!.GetValue(item), value));
+            selector.SetCurrentValue(System.Windows.Controls.Primitives.Selector.SelectedItemProperty, choice);
+            await selector.Dispatcher.InvokeAsync(() => { }, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+            dashboard.UpdateLayout();
+        }
+        foreach (var position in new[] { false, true })
+        foreach (var size in Enum.GetValues<TaskbarIndicatorSize>())
+        {
+            await SetSelection(dashboard.PulsePositionSelector, position);
+            await SetSelection(dashboard.TaskbarSizeSelector, size);
+            foreach (var language in new[] { "en", "uk", "en" })
+            {
+                await SetSelection(dashboard.LanguageSelector, language);
+                var positionName = Strings.Current[position ? "PulsePositionLeft" : "PulsePositionRight"];
+                var sizeName = Strings.Current["TaskbarSize" + size];
+                var selectionMatches = dashboard.PulsePositionSelector.SelectedItem is PulsePositionChoice selectedPosition &&
+                    selectedPosition.IsLeft == position && selectedPosition.Name == positionName &&
+                    dashboard.TaskbarSizeSelector.SelectedItem is TaskbarSizeChoice selectedSize &&
+                    selectedSize.Size == size && selectedSize.Name == sizeName;
+                var labelsVisible = VisualChildren<TextBlock>(dashboard.PulsePositionSelector).Any(text => text.Text == positionName) &&
+                    VisualChildren<TextBlock>(dashboard.TaskbarSizeSelector).Any(text => text.Text == sizeName);
+                var noValidationErrors = !Validation.GetHasError(dashboard.PulsePositionSelector) && !Validation.GetHasError(dashboard.TaskbarSizeSelector);
+                var saved = settings.Load();
+                var settingsPreserved = saved.PulseOnLeft == position && saved.TaskbarSize == size && saved.Language == language &&
+                    model.PulseOnLeft == position && model.TaskbarSize == size;
+                passed &= selectionMatches && labelsVisible && noValidationErrors && settingsPreserved;
+                samples.Add(new { Language = language, PulseOnLeft = position, Size = size.ToString(),
+                    SelectionMatches = selectionMatches, TranslatedLabelsVisible = labelsVisible,
+                    NoValidationErrors = noValidationErrors, SavedSettingsPreserved = settingsPreserved });
+            }
+        }
+        Render((Visual)dashboard.Content, 960, 690, Path.Combine(folder, "settings-language-switch.png"));
+        await SetSelection(dashboard.PulsePositionSelector, originalPosition);
+        await SetSelection(dashboard.TaskbarSizeSelector, originalSize);
+        await SetSelection(dashboard.LanguageSelector, originalLanguage);
+        File.WriteAllText(Path.Combine(folder, "settings-language-checks.json"), JsonSerializer.Serialize(new
+        { Passed = passed, Samples = samples }, new JsonSerializerOptions { WriteIndented = true }));
+        dashboard.Close();
+        return passed;
+    }
+    private static IEnumerable<T> VisualChildren<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(parent); index++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, index);
+            if (child is T match) yield return match;
+            foreach (var descendant in VisualChildren<T>(child)) yield return descendant;
+        }
     }
     private static IEnumerable<MenuItem> Descendants(ItemCollection items)
     {

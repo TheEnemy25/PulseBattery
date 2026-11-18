@@ -23,6 +23,7 @@ public partial class App : Application
     private EventWaitHandle? _activation;
     private RegisteredWaitHandle? _activationWait;
     private Dashboard? _dashboard;
+    private HwndSource? _messageSource;
     private TaskbarPanelService? _taskbar;
     private DashboardViewModel? _viewModel;
     private TrayService? _tray;
@@ -33,6 +34,9 @@ public partial class App : Application
     protected override async void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+        // The dashboard is a small, mostly static UI. Avoid retaining a GPU rendering
+        // device and its surfaces after returning to background monitoring.
+        RenderOptions.ProcessRenderMode = RenderMode.SoftwareOnly;
         try
         {
             if (e.Args.Contains("--check-presentation"))
@@ -42,8 +46,8 @@ public partial class App : Application
                 IsExiting = true; Shutdown(valid ? 0 : 1); return;
             }
             var smokeTest = e.Args.Contains("--smoke-test");
-            var verification = e.Args.Any(a => a is "--smoke-test" or "--check-taskbar" or "--check-startup" or "--check-menu");
-            if (!smokeTest)
+            var verification = e.Args.Any(a => a is "--smoke-test" or "--check-taskbar" or "--check-startup" or "--check-menu" or "--check-background");
+            if (!smokeTest && !e.Args.Contains("--check-background"))
             {
                 _instance = new Mutex(true, "Local\\PulseBattery.Instance", out var firstInstance);
                 _activation = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\PulseBattery.Activate");
@@ -54,18 +58,17 @@ public partial class App : Application
             _viewModel = new(monitor, new JsonSettingsStore(), _lifetime.Token,
                 verification ? null : new WindowsStartupRegistration(Environment.ProcessPath!));
             if (e.Args.Contains("--autostart") && _viewModel.Settings.StartWithWindows != true) { IsExiting = true; Shutdown(); return; }
-            _dashboard = new(_viewModel);
-            MainWindow = _dashboard;
             if (smokeTest)
             {
+                var dashboard = new Dashboard(_viewModel);
                 await _viewModel.RefreshAsync();
                 var folder = e.Args.SkipWhile(a => a != "--smoke-test").Skip(1).FirstOrDefault() ?? "artifacts";
                 Directory.CreateDirectory(folder);
-                RenderPreview(_dashboard, Path.Combine(folder, "preview.png"));
+                RenderPreview(dashboard, Path.Combine(folder, "preview.png"));
                 using (var trayCheck = new TrayService(_viewModel, () => { })) trayCheck.Update();
                 _viewModel.SettingsOpen = true;
-                RenderPreview(_dashboard, Path.Combine(folder, "settings-preview.png"));
-                var widgetContent = new TaskbarPanel(_viewModel, () => { });
+                RenderPreview(dashboard, Path.Combine(folder, "settings-preview.png"));
+                using var widgetContent = new TaskbarPanel(_viewModel, () => { });
                 await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
                 widgetContent.Measure(new Size(double.PositiveInfinity, double.PositiveInfinity));
                 var widgetSize = widgetContent.DesiredSize;
@@ -88,14 +91,25 @@ public partial class App : Application
             _timer.Tick += async (_, _) => await _viewModel.RefreshAsync();
             _deviceDebounce = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
             _deviceDebounce.Tick += async (_, _) => { _deviceDebounce.Stop(); await _viewModel.RefreshAsync(); };
-            _dashboard.SourceInitialized += (_, _) => HwndSource.FromHwnd(new WindowInteropHelper(_dashboard).Handle)?.AddHook(WindowMessage);
+            // A hidden native window receives device broadcasts without constructing the dashboard.
+            // HWND_MESSAGE windows do not receive these broadcasts, so keep a hidden top-level HWND.
+            _messageSource = new HwndSource(new HwndSourceParameters("Pulse.DeviceEvents")
+            {
+                WindowStyle = unchecked((int)0x80000000), ExtendedWindowStyle = 0x08000080,
+                Width = 0, Height = 0, HwndSourceHook = WindowMessage
+            });
             SystemEvents.PowerModeChanged += OnPowerModeChanged;
             ApplySettings();
             if (!verification && !e.Args.Contains("--autostart") && _viewModel.NeedsStartupChoice)
                 new StartupPrompt(_viewModel).ShowDialog();
             if (e.Args.Contains("--dashboard")) ShowDashboard();
-            else new WindowInteropHelper(_dashboard).EnsureHandle();
             await _viewModel.RefreshAsync();
+            if (e.Args.Contains("--check-background"))
+            {
+                var folder = e.Args.SkipWhile(a => a != "--check-background").Skip(1).FirstOrDefault() ?? "artifacts/background-checks";
+                var valid = await CheckBackgroundAsync(folder);
+                IsExiting = true; Shutdown(valid ? 0 : 1); return;
+            }
             if (!verification && !e.Args.Contains("--autostart")) _viewModel.UpdateStartupExecutable();
             if (e.Args.Contains("--check-menu"))
             {
@@ -119,7 +133,7 @@ public partial class App : Application
             var log = Path.Combine(AppContext.BaseDirectory, "startup-error.log");
             try { File.WriteAllText(log, exception.ToString()); }
             catch (Exception loggingException) when (loggingException is IOException or UnauthorizedAccessException) { }
-            if (!e.Args.Any(a => a is "--smoke-test" or "--check-presentation" or "--check-taskbar" or "--check-startup" or "--check-menu")) MessageBox.Show(exception.Message, Strings.Current["StartupError"], MessageBoxButton.OK, MessageBoxImage.Error);
+            if (!e.Args.Any(a => a is "--smoke-test" or "--check-presentation" or "--check-taskbar" or "--check-startup" or "--check-menu" or "--check-background")) MessageBox.Show(exception.Message, Strings.Current["StartupError"], MessageBoxButton.OK, MessageBoxImage.Error);
             IsExiting = true;
             Shutdown(1);
         }
@@ -135,8 +149,20 @@ public partial class App : Application
 
     public void ShowDashboard()
     {
-        if (_dashboard is null) return;
+        if (_viewModel is null || IsExiting) return;
+        if (_dashboard is null)
+        {
+            _dashboard = new(_viewModel);
+            _dashboard.Closed += DashboardClosed;
+            MainWindow = _dashboard;
+        }
         _dashboard.Show(); _dashboard.WindowState = WindowState.Normal; _dashboard.Activate();
+    }
+    private void DashboardClosed(object? sender, EventArgs e)
+    {
+        if (sender is Dashboard dashboard) dashboard.Closed -= DashboardClosed;
+        _dashboard = null;
+        MainWindow = null;
     }
     public void ExitApplication() { IsExiting = true; Shutdown(); }
     private nint WindowMessage(nint handle, int message, nint wParam, nint lParam, ref bool handled)
@@ -167,7 +193,7 @@ public partial class App : Application
         _lifetime.Cancel(); _timer?.Stop(); _deviceDebounce?.Stop();
         SystemEvents.PowerModeChanged -= OnPowerModeChanged;
         _activationWait?.Unregister(null); _activation?.Dispose();
-        _taskbar?.Dispose(); _tray?.Dispose(); _instance?.Dispose();
+        _messageSource?.Dispose(); _taskbar?.Dispose(); _tray?.Dispose(); _instance?.Dispose();
         base.OnExit(e);
     }
     protected override void OnSessionEnding(SessionEndingCancelEventArgs e) { IsExiting = true; base.OnSessionEnding(e); }

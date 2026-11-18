@@ -19,28 +19,34 @@ public sealed class TrayService : IDisposable
     private readonly Forms.NotifyIcon _main;
     private readonly HashSet<string> _alerted = [];
     private readonly DashboardViewModel _viewModel;
-    private readonly TaskbarPanel _fallbackMenu;
+    private TaskbarPanel? _fallbackMenu;
+    private readonly Action _open;
     private readonly DispatcherTimer _alertTimer;
     private bool _taskbarAvailable;
     private bool _showingAlert;
 
     public TrayService(DashboardViewModel viewModel, Action open)
     {
-        _viewModel = viewModel;
-        _fallbackMenu = new(viewModel, open);
-        _main = new() { Text = Strings.Current["WindowTitle"], Icon = CreateIcon(), Visible = true };
+        _viewModel = viewModel; _open = open;
+        _main = new() { Text = Strings.Current["WindowTitle"], Visible = false };
         _alertTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
         _alertTimer.Tick += (_, _) => { _alertTimer.Stop(); _showingAlert = false; UpdateVisibility(); };
         Strings.Current.LanguageChanged += OnLanguageChanged;
         _main.MouseClick += (_, e) =>
         {
             if (e.Button == Forms.MouseButtons.Left) open();
-            else if (e.Button == Forms.MouseButtons.Right) _fallbackMenu.OpenApplicationMenuAtPointer();
+            else if (e.Button == Forms.MouseButtons.Right)
+                (_fallbackMenu ??= new(_viewModel, _open)).OpenApplicationMenuAtPointer();
         };
     }
 
     public void SetTaskbarAvailable(bool available) { _taskbarAvailable = available; UpdateVisibility(); }
-    private void UpdateVisibility() => _main.Visible = !_taskbarAvailable || _showingAlert;
+    private void UpdateVisibility()
+    {
+        var visible = !_taskbarAvailable || _showingAlert;
+        if (visible && _main.Icon is null) _main.Icon = CreateIcon();
+        _main.Visible = visible;
+    }
 
     public void Update()
     {
@@ -61,6 +67,7 @@ public sealed class TrayService : IDisposable
         }
         var summary = "Pulse · " + string.Join(" · ", _viewModel.Devices.Select(d => $"{d.Name}: {d.Level}{d.Percent}"));
         _main.Text = summary[..Math.Min(summary.Length, 127)];
+        UpdateVisibility();
     }
 
     private static Drawing.Icon CreateIcon()
@@ -81,7 +88,7 @@ public sealed class TrayService : IDisposable
     public void Dispose()
     {
         Strings.Current.LanguageChanged -= OnLanguageChanged;
-        _alertTimer.Stop(); _fallbackMenu.Dispose();
+        _alertTimer.Stop(); _fallbackMenu?.Dispose();
         _main.Visible = false; _main.Icon?.Dispose(); _main.Dispose();
     }
     private void OnLanguageChanged()

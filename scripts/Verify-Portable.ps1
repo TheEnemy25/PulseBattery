@@ -70,5 +70,14 @@ $report = [ordered]@{
     WpfAndSvgChecksPassed = $true
     RealHardwareChecksPassed = $true
 }
+$backgroundFolder = Join-Path $reportFolder 'background'
+$background = Start-PortableCheck '--check-background' $backgroundFolder
+try {
+    if (-not $background.WaitForExit(30000)) { throw 'Portable background checks timed out.' }
+    $background.Refresh()
+    if ($background.ExitCode -ne 0) { throw 'Portable background checks failed.' }
+}
+finally { if (-not $background.HasExited) { $background.Kill(); [void]$background.WaitForExit(5000) } }
+$report['BackgroundLifecycleChecksPassed'] = $true
 $report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $reportFolder 'portable-checks.json') -Encoding UTF8
 Write-Host ('Portable executable verified: {0:N1} MB' -f ($report.Bytes / 1MB))

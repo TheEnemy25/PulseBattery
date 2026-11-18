@@ -5,7 +5,8 @@
              ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
         <ResourceDictionary>
-            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Themes/Dark.xaml" /><ResourceDictionary Source="Themes/Menus.xaml" /></ResourceDictionary.MergedDictionaries>
+            <ResourceDictionary.MergedDictionaries><ResourceDictionary Source="Themes/Menus.xaml" /></ResourceDictionary.MergedDictionaries>
+            <BooleanToVisibilityConverter x:Key="BoolVisibility" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

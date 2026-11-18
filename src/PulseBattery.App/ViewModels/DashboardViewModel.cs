@@ -52,8 +52,7 @@ public sealed class DashboardViewModel : ObservableObject
         get => _settings.PulseOnLeft;
         set { if (_settings.PulseOnLeft == value) return; _settings = _settings with { PulseOnLeft = value }; Changed(); Save(); }
     }
-    public IReadOnlyList<PulsePositionChoice> PulsePositions =>
-        [new(true, Strings.Current["PulsePositionLeft"]), new(false, Strings.Current["PulsePositionRight"])];
+    public IReadOnlyList<PulsePositionChoice> PulsePositions { get; } = [new(true), new(false)];
     public TaskbarIndicatorSize TaskbarSize
     {
         get => _settings.TaskbarSize;
@@ -65,8 +64,8 @@ public sealed class DashboardViewModel : ObservableObject
         }
     }
     public TaskbarAppearance TaskbarAppearance => TaskbarAppearance.For(TaskbarSize);
-    public IReadOnlyList<TaskbarSizeChoice> TaskbarSizes => Enum.GetValues<TaskbarIndicatorSize>()
-        .Select(size => new TaskbarSizeChoice(size, Strings.Current["TaskbarSize" + size])).ToArray();
+    public IReadOnlyList<TaskbarSizeChoice> TaskbarSizes { get; } = Enum.GetValues<TaskbarIndicatorSize>()
+        .Select(size => new TaskbarSizeChoice(size)).ToArray();
     public bool StartWithWindows { get => _settings.StartWithWindows == true; set => SetStartupPreference(value); }
     public bool NeedsStartupChoice => _settings.StartWithWindows is null;
 
@@ -188,9 +187,26 @@ public sealed class DashboardViewModel : ObservableObject
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or System.Security.SecurityException)
         { Error = Strings.Current.Format("StartupSaveError", exception.Message); }
     }
-    private void OnLanguageChanged() { Changed(null); RebuildDevices(); }
+    private void OnLanguageChanged()
+    {
+        // Keep the selected objects in each ComboBox; replacing ItemsSource can write
+        // a temporary null SelectedValue back into the non-nullable settings bindings.
+        foreach (var choice in PulsePositions) choice.RefreshName();
+        foreach (var choice in TaskbarSizes) choice.RefreshName();
+        Changed(null); RebuildDevices();
+    }
 }
 
 public sealed record LanguageChoice(string Code, string Name);
-public sealed record PulsePositionChoice(bool IsLeft, string Name);
-public sealed record TaskbarSizeChoice(TaskbarIndicatorSize Size, string Name);
+public sealed class PulsePositionChoice(bool isLeft) : ObservableObject
+{
+    public bool IsLeft { get; } = isLeft;
+    public string Name => Strings.Current[IsLeft ? "PulsePositionLeft" : "PulsePositionRight"];
+    internal void RefreshName() => Changed(nameof(Name));
+}
+public sealed class TaskbarSizeChoice(TaskbarIndicatorSize size) : ObservableObject
+{
+    public TaskbarIndicatorSize Size { get; } = size;
+    public string Name => Strings.Current["TaskbarSize" + Size];
+    internal void RefreshName() => Changed(nameof(Name));
+}
