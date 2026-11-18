@@ -8,6 +8,7 @@ namespace PulseBattery.Infrastructure.Providers;
 public sealed class LogitechBatteryProvider(HidDeviceCatalog catalog, Action<string>? trace = null) : IBatteryProvider
 {
     private readonly Dictionary<string, string> _names = [];
+    private readonly HashSet<string> _batteryDevices = [];
     public async Task<IReadOnlyList<BatteryDevice>> GetDevicesAsync(CancellationToken cancellationToken)
     {
         var candidates = await Task.Run(() => LogitechEndpoints.Select(catalog.Enumerate()), cancellationToken);
@@ -17,6 +18,7 @@ public sealed class LogitechBatteryProvider(HidDeviceCatalog catalog, Action<str
             var receiver = endpoint.Device;
             var id = endpoint.Id;
             var name = _names.GetValueOrDefault(id, "Logitech LIGHTSPEED");
+            var batterySupported = _batteryDevices.Contains(id) || receiver.ProductId is >= 0xC500 and <= 0xC5FF;
             try
             {
                 using var connection = new HidConnection(receiver);
@@ -54,10 +56,11 @@ public sealed class LogitechBatteryProvider(HidDeviceCatalog catalog, Action<str
                 }
                 if (!deviceResponded)
                 {
-                    results.Add(new(id, name, DeviceKind.Mouse, null, null, ReadingState.Unavailable, "HID++", "Розбуди мишку або перевір підключення приймача."));
+                    results.Add(new(id, name, DeviceKind.Mouse, null, null, ReadingState.Unavailable, "HID++", "Розбуди мишку або перевір підключення приймача.") { PhysicalId = receiver.ContainerId, BatterySupported = batterySupported });
                     continue;
                 }
                 var batteryFeature = unified != 0 ? unified : await Feature(0x1000);
+                if (batteryFeature != 0) { _batteryDevices.Add(id); batterySupported = true; }
                 var batteryReply = batteryFeature == 0 ? null : await Query(batteryFeature, unified != 0 ? (byte)1 : (byte)0);
                 var battery = batteryReply is not null && batteryReply[2] != 0xFF ? BatteryReports.LogitechBattery(batteryReply, unified != 0) : (Level: (int?)null, Charging: (bool?)null);
                 var nameFeature = await Feature(0x0005);
@@ -85,11 +88,11 @@ public sealed class LogitechBatteryProvider(HidDeviceCatalog catalog, Action<str
                         kind = kindReply[4] switch { 0 or 2 => DeviceKind.Keyboard, 3 or 4 or 5 => DeviceKind.Mouse, _ => kind };
                 }
                 results.Add(new(id, name, kind, battery.Level, battery.Charging,
-                    battery.Level is null ? ReadingState.Unavailable : ReadingState.Available, "HID++", battery.Level is null ? "Розбуди мишку або перевір підключення приймача." : receiver.ProductId == 0xC09B ? "USB-кабель" : "LIGHTSPEED · USB-приймач"));
+                    battery.Level is null ? ReadingState.Unavailable : ReadingState.Available, "HID++", battery.Level is null ? "Розбуди мишку або перевір підключення приймача." : receiver.ProductId == 0xC09B ? "USB-кабель" : "LIGHTSPEED · USB-приймач") { PhysicalId = receiver.ContainerId, BatterySupported = batterySupported });
             }
             catch (Exception exception) when (exception is IOException or System.ComponentModel.Win32Exception)
             {
-                results.Add(new(id, name, DeviceKind.Mouse, null, null, ReadingState.Unavailable, "HID++", exception.Message));
+                results.Add(new(id, name, DeviceKind.Mouse, null, null, ReadingState.Unavailable, "HID++", exception.Message) { PhysicalId = receiver.ContainerId, BatterySupported = batterySupported });
             }
         }
         return results;

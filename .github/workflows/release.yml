@@ -1,0 +1,92 @@
+name: Windows release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate version and check existing release
+        id: version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          [xml]$project = Get-Content -Raw src/PulseBattery.App/PulseBattery.App.csproj
+          $version = [string]$project.Project.PropertyGroup.Version
+          if ($version -notmatch '^\d+\.\d+\.\d+$') { throw 'Expected major.minor.patch in the project version.' }
+          $tag = 'v' + $version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $tag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match application version $version."
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "RELEASE_TAG=$tag" >> $env:GITHUB_ENV
+          $existing = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,assets 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $release = $existing | ConvertFrom-Json
+            $required = @('PulseBattery.exe', 'PulseBattery-Setup.exe', 'PulseBattery-Portable-win-x64.zip', 'SHA256SUMS.txt')
+            if ($release.isDraft -or @($required | Where-Object { $_ -notin $release.assets.name }).Count -ne 0) {
+              throw 'An incomplete release already exists. Finish or remove that draft before retrying.'
+            }
+            'exists=true' >> $env:GITHUB_OUTPUT
+            "Release $tag already has all download assets; leaving it unchanged." >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            'exists=false' >> $env:GITHUB_OUTPUT
+          }
+          $global:LASTEXITCODE = 0
+
+      - name: Set up .NET 10
+        if: steps.version.outputs.exists != 'true'
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build and package Windows downloads
+        if: steps.version.outputs.exists != 'true'
+        run: ./scripts/Build-Release.ps1 -ExpectedVersion $env:RELEASE_TAG
+
+      - name: Publish EXE and ZIP assets
+        if: steps.version.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $notes = @(
+            'Windows x64. The .NET runtime is included.',
+            '',
+            '- PulseBattery-Setup.exe: installer with folder selection and Windows uninstall support.',
+            '- PulseBattery-Portable-win-x64.zip: extract and run without installation.',
+            '- PulseBattery.exe: standalone portable executable.',
+            '- SHA256SUMS.txt: download checksums.',
+            '',
+            'This build is unsigned. Windows Smart App Control may block it.'
+          )
+          $notesFile = Join-Path $env:RUNNER_TEMP 'pulse-release-notes.md'
+          $notes | Set-Content -LiteralPath $notesFile -Encoding utf8
+          gh release create $env:RELEASE_TAG `
+            artifacts/release/PulseBattery-Setup.exe `
+            artifacts/release/PulseBattery-Portable-win-x64.zip `
+            artifacts/release/PulseBattery.exe `
+            artifacts/release/SHA256SUMS.txt `
+            --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA `
+            --title "Pulse Battery $($env:RELEASE_TAG)" --notes-file $notesFile --generate-notes --latest
+          if ($LASTEXITCODE -ne 0) { throw 'GitHub release publication failed.' }
+          "Downloads: https://github.com/$env:GITHUB_REPOSITORY/releases/tag/$env:RELEASE_TAG" >> $env:GITHUB_STEP_SUMMARY

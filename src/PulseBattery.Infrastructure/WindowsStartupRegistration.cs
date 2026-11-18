@@ -7,6 +7,18 @@ public sealed class WindowsStartupRegistration(string executablePath) : IStartup
 {
     private const string RunKey = @"Software\Microsoft\Windows\CurrentVersion\Run";
     private const string ValueName = "PulseBattery";
+    public const string InstallerPreferencesKey = @"Software\PulseBattery\InstallerStartup";
+
+    public void ApplyInstallerPreference(ISettingsStore settingsStore)
+    {
+        // Setup records explicit consent for this executable, including a declined choice.
+        // Consume it only after saving, so a failed save can be retried on the next launch.
+        var path = Path.GetFullPath(executablePath);
+        using var key = Registry.CurrentUser.OpenSubKey(InstallerPreferencesKey, writable: true);
+        if (key?.GetValue(path) is not int choice || choice is not (0 or 1)) return;
+        settingsStore.Save(settingsStore.Load() with { StartWithWindows = choice == 1 });
+        key.DeleteValue(path, throwOnMissingValue: false);
+    }
 
     public void SetEnabled(bool enabled)
     {

@@ -41,7 +41,7 @@ public sealed class TrayService : IDisposable
             {
                 if (_viewModel.Notifications && _alerted.Add(reading.Id))
                 {
-                    _main.ShowBalloonTip(7000, Strings.Current["BatteryAlertTitle"], Strings.Current.Format("BatteryAlertBody", device.Name, device.Level), Forms.ToolTipIcon.Warning);
+                    _main.ShowBalloonTip(7000, Strings.Current["BatteryAlertTitle"], Strings.Current.Format(reading.BatteryPercent.HasValue ? "BatteryAlertBody" : "BatteryLevelAlertBody", device.Name, device.Level), Forms.ToolTipIcon.Warning);
                 }
             }
             else if (reading.State == ReadingState.Available) _alerted.Remove(reading.Id);

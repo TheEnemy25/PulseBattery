@@ -1,4 +1,4 @@
-param([switch]$SelfContained, [switch]$SingleFile)
+param([switch]$SelfContained, [switch]$SingleFile, [switch]$Installer, [string]$InnoSetupCompiler)
 $ErrorActionPreference = 'Stop'
 Set-Location -LiteralPath $PSScriptRoot
 $env:DOTNET_CLI_HOME = Join-Path $PSScriptRoot '.local'
@@ -20,7 +20,7 @@ $background = Start-Process -FilePath $presentationApp -ArgumentList '--check-ba
 if (-not $background.WaitForExit(30000)) { $background.Kill(); throw 'Background checks timed out.' }
 $background.Refresh()
 if ($background.ExitCode -ne 0) { throw 'Background checks failed. See artifacts/background-checks/background-checks.json.' }
-if ($SingleFile) {
+if ($SingleFile -or $Installer) {
     $env:NUGET_PACKAGES = Join-Path $PSScriptRoot '.local/nuget/packages'
     $portableOutput = Join-Path $PSScriptRoot 'artifacts/portable/win-x64'
     # Keep embedded assemblies memory-mappable instead of decompressing them into private RAM.
@@ -30,10 +30,17 @@ if ($SingleFile) {
     if ($LASTEXITCODE -ne 0) { throw 'Single-file publish failed.' }
     $publishedFiles = @(Get-ChildItem -LiteralPath $portableOutput -File)
     if ($publishedFiles.Count -ne 1 -or $publishedFiles[0].Name -ne 'PulseBattery.exe') { throw 'Expected exactly one portable executable.' }
-    $portableExe = Join-Path $PSScriptRoot 'PulseBattery.exe'
-    Copy-Item -LiteralPath $publishedFiles[0].FullName -Destination $portableExe -Force
+    $portableExe = $publishedFiles[0].FullName
+    if (-not $Installer) {
+        $portableExe = Join-Path $PSScriptRoot 'PulseBattery.exe'
+        Copy-Item -LiteralPath $publishedFiles[0].FullName -Destination $portableExe -Force
+    }
     & (Join-Path $PSScriptRoot 'scripts/Verify-Portable.ps1') -Executable $portableExe
-    Write-Host ('Ready to share: ' + $portableExe)
+    & (Join-Path $PSScriptRoot 'scripts/Build-PortableZip.ps1') -Executable $portableExe
+    if ($Installer) {
+        & (Join-Path $PSScriptRoot 'scripts/Build-Installer.ps1') -Executable $portableExe -InnoSetupCompiler $InnoSetupCompiler
+    }
+    else { Write-Host ('Ready to share: ' + $portableExe) }
     return
 }
 $publishArguments = @('publish', 'src/PulseBattery.App', '-c', 'Release', '-o', 'artifacts/PulseBattery', '--nologo')

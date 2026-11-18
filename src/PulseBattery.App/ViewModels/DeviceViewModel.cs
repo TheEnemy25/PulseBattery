@@ -30,9 +30,10 @@ public sealed class DeviceViewModel(BatteryDevice device, int threshold, DeviceK
     internal void RefreshLocalization() => Changed(null);
     public string Name => Device.Name;
     public string Category => Strings.Current["Kind" + Kind].ToUpper(Strings.Current.Culture);
-    public string Level => Device.BatteryPercent?.ToString() ?? "—";
+    public string Level => Device.BatteryPercent?.ToString() ?? (Device.ChargeLevel is { } level ? Strings.Current["BatteryLevel" + level] : "—");
     public string Percent => Device.BatteryPercent.HasValue ? "%" : "";
     public double Progress => Device.BatteryPercent ?? 0;
+    public bool ShowProgress => Device.BatteryPercent.HasValue;
     public string Connection => Strings.Current.TranslateDetail(Device.Detail);
     public string Source => Device.Source;
     public bool IsCharging => Device.State == ReadingState.Available && Device.IsCharging == true;
@@ -42,6 +43,7 @@ public sealed class DeviceViewModel(BatteryDevice device, int threshold, DeviceK
         ReadingState.Stale => Strings.Current.Format("LastReading", Device.LastSeen),
         ReadingState.Unavailable => Strings.Current["NoData"],
         _ when Device.IsCharging == true => Strings.Current["Charging"],
+        _ when Device.ChargeLevel is not null && Device.BatteryPercent is null => Strings.Current["CoarseBatteryLevel"],
         _ when Device.IsLow(_threshold) => Strings.Current["ChargeSoon"],
         _ => Strings.Current["OnBattery"]
     };

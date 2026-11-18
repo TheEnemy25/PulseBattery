@@ -7,6 +7,7 @@ using PulseBattery.Infrastructure.Hid;
 namespace PulseBattery.Infrastructure.Bluetooth;
 
 public sealed record WindowsDeviceNode(string Id, string Name, string ClassName, string ContainerId, int? BatteryPercent, string? BluetoothAddress);
+public sealed record WindowsDeviceInterface(string Path, WindowsDeviceNode Node);
 
 public sealed class WindowsDeviceCatalog
 {
@@ -30,23 +31,64 @@ public sealed class WindowsDeviceCatalog
                     if (Marshal.GetLastWin32Error() != 259) throw new Win32Exception(Marshal.GetLastWin32Error());
                     break;
                 }
-                var idBuffer = new StringBuilder(2048);
-                if (!NativeMethods.SetupDiGetDeviceInstanceIdW(set, ref info, idBuffer, (uint)idBuffer.Capacity, out _)) continue;
-                var id = idBuffer.ToString();
-                var batteryBytes = Read(set, ref info, BatteryKey, out var batteryType);
-                var battery = ParseBattery(batteryBytes, batteryType);
-                if (battery is null && !id.StartsWith("BTH", StringComparison.OrdinalIgnoreCase)) continue;
-                var name = ReadString(set, ref info, new(DeviceProperties, 14));
-                if (name.Length == 0) name = ReadString(set, ref info, new(DeviceProperties, 2));
-                var className = ReadString(set, ref info, new(DeviceProperties, 9));
-                var containerBytes = Read(set, ref info, ContainerKey, out _);
-                var container = containerBytes.Length == 16 ? new Guid(containerBytes).ToString("D") : id;
-                var match = Regex.Match(id, @"(?:DEV_|BluetoothDevice_)([0-9A-F]{12})", RegexOptions.IgnoreCase);
-                nodes.Add(new(id, name, className, container, battery, match.Success ? match.Groups[1].Value.ToUpperInvariant() : null));
+                var node = ReadNode(set, ref info);
+                if (node is not null && (node.BatteryPercent.HasValue || node.Id.StartsWith("BTH", StringComparison.OrdinalIgnoreCase) ||
+                    node.ClassName is "Mouse" or "Keyboard" && node.Id.StartsWith("HID\\", StringComparison.OrdinalIgnoreCase) ||
+                    node.ClassName.Equals("MEDIA", StringComparison.OrdinalIgnoreCase) && node.Id.StartsWith("USB\\", StringComparison.OrdinalIgnoreCase))) nodes.Add(node);
             }
         }
         finally { NativeMethods.SetupDiDestroyDeviceInfoList(set); }
         return nodes;
+    }
+
+    internal static WindowsDeviceNode? ReadNode(nint set, ref NativeMethods.DeviceInfo info)
+    {
+        var idBuffer = new StringBuilder(2048);
+        if (!NativeMethods.SetupDiGetDeviceInstanceIdW(set, ref info, idBuffer, (uint)idBuffer.Capacity, out _)) return null;
+        var id = idBuffer.ToString();
+        var batteryBytes = Read(set, ref info, BatteryKey, out var batteryType);
+        var name = ReadString(set, ref info, new(DeviceProperties, 14));
+        if (name.Length == 0) name = ReadString(set, ref info, new(new("540b947e-8b40-45bc-a8a2-6a0b894cbda2"), 4));
+        if (name.Length == 0) name = ReadString(set, ref info, new(DeviceProperties, 2));
+        var className = ReadString(set, ref info, new(DeviceProperties, 9));
+        var bytes = Read(set, ref info, ContainerKey, out _);
+        var container = bytes.Length == 16 && new Guid(bytes) != Guid.Empty ? new Guid(bytes).ToString("D") : id;
+        var match = Regex.Match(id, @"(?:DEV_|BluetoothDevice_)([0-9A-F]{12})", RegexOptions.IgnoreCase);
+        return new(id, name, className, container, ParseBattery(batteryBytes, batteryType), match.Success ? match.Groups[1].Value.ToUpperInvariant() : null);
+    }
+
+    public IReadOnlyList<WindowsDeviceInterface> EnumerateInterfaces(Guid guid, CancellationToken cancellationToken = default)
+    {
+        var set = NativeMethods.SetupDiGetClassDevsW(in guid, null, 0, 0x12);
+        if (set == -1) throw new Win32Exception(Marshal.GetLastWin32Error());
+        var result = new List<WindowsDeviceInterface>();
+        try
+        {
+            for (uint index = 0; ; index++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var data = new NativeMethods.InterfaceData { Size = Marshal.SizeOf<NativeMethods.InterfaceData>() };
+                if (!NativeMethods.SetupDiEnumDeviceInterfaces(set, 0, in guid, index, ref data))
+                {
+                    if (Marshal.GetLastWin32Error() != 259) throw new Win32Exception(Marshal.GetLastWin32Error());
+                    break;
+                }
+                NativeMethods.SetupDiGetDeviceInterfaceDetailW(set, ref data, 0, 0, out var size, 0);
+                if (size is < 8 or > 65536) continue;
+                var detail = Marshal.AllocHGlobal((int)size);
+                try
+                {
+                    Marshal.WriteInt32(detail, IntPtr.Size == 8 ? 8 : 6);
+                    var info = new NativeMethods.DeviceInfo { Size = Marshal.SizeOf<NativeMethods.DeviceInfo>() };
+                    if (!NativeMethods.SetupDiGetDeviceInterfaceDetailW(set, ref data, detail, size, out _, ref info)) continue;
+                    var node = ReadNode(set, ref info);
+                    if (node is not null && Marshal.PtrToStringUni(detail + 4) is { } path) result.Add(new(path, node));
+                }
+                finally { Marshal.FreeHGlobal(detail); }
+            }
+        }
+        finally { NativeMethods.SetupDiDestroyDeviceInfoList(set); }
+        return result;
     }
 
     public static int? ParseBattery(byte[] bytes, uint type)

@@ -91,7 +91,10 @@ internal static class PresentationChecks
             menuIconsRender &= Enumerable.Range(0, 18 * 18).Count(i => pixels[i * 4 + 3] > 20) >= 12;
         }
         var originalLanguage = viewModel.Language;
+        var coarseReading = new BatteryDevice("test:coarse", "Test controller", DeviceKind.Gamepad, null, null, ReadingState.Available, "XInput battery", "test") { ChargeLevel = BatteryChargeLevel.Low };
+        var coarseModel = new DeviceViewModel(coarseReading, 15);
         viewModel.Language = "en";
+        var coarseEnglish = coarseModel.Level == "Low" && coarseModel.Percent == "" && !coarseModel.ShowProgress && coarseModel.Status == "Approximate level";
         await Task.Delay(100);
         var openMenuItem = panel.ContextMenu!.Items.OfType<MenuItem>().Single(item => AutomationProperties.GetAutomationId(item) == "Taskbar.Open");
         var englishLive = openMenuItem.Header?.ToString() == "Open Pulse" && viewModel.Devices[0].Status == "Charging" && viewModel.Settings.Language == "en";
@@ -104,6 +107,7 @@ internal static class PresentationChecks
         await Task.Delay(100);
         Render(dashboardContent, 960, 690, Path.Combine(folder, "dashboard-english.png"));
         viewModel.Language = "uk";
+        var coarseUkrainian = coarseModel.Level == "Низ." && coarseModel.Percent == "" && !coarseModel.ShowProgress;
         await Task.Delay(100);
         var ukrainianLive = openMenuItem.Header?.ToString() == "Відкрити Pulse" && viewModel.Devices[0].Status == "Заряджається";
         var ukrainianComplete = Strings.Current.Keys.All(k => !string.IsNullOrWhiteSpace(Strings.Current[k]) && !Strings.Current[k].StartsWith('['));
@@ -111,10 +115,12 @@ internal static class PresentationChecks
         var ukrainianGamepad = viewModel.Devices.First(d => d.Device.Id == "test:gamepad").Category == "ГЕЙМПАД" && Strings.Current["KindGamepad"] == "Геймпад";
         var settingsLanguagePassed = await CheckSettingsLanguageAsync(dashboard, viewModel, settings, folder);
         var passed = dashboardSessionPassed && taskbarMenuStartsUnloaded && settingsLanguagePassed && taskbarVisibilityPassed && startupConsentPassed && deviceOrderPassed && animationChanged && hitArea && darkForeground && lightForeground && distinctIcons && overrideWorks && gamepadOverrideWorks && englishGamepad && ukrainianGamepad && retainedOffline && restoredAfterReconnect && automaticRestored && uniformMenuIcons && menuIconsRender && formalEarbudName && englishLive && ukrainianLive && englishComplete && ukrainianComplete;
+        passed &= coarseEnglish && coarseUkrainian;
         viewModel.Language = originalLanguage;
         File.WriteAllText(Path.Combine(folder, "presentation-checks.json"), JsonSerializer.Serialize(new
         {
             TestFixtures = true, Passed = passed, ChargingAnimationChanges = animationChanged,
+            ControllerLevelsLocalizedWithoutFakePercentages = coarseEnglish && coarseUkrainian,
             TaskbarMenuCreatedOnlyOnDemand = taskbarMenuStartsUnloaded,
             DeviceOrderPersistsAndMatchesTaskbar = deviceOrderPassed,
             StartupRequiresConsentAndCanBeChanged = startupConsentPassed,

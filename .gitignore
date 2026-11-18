@@ -5,3 +5,5 @@
 artifacts/
 *.user
 /PulseBattery.exe
+/PulseBattery-Setup.exe
+/PulseBattery-Portable-win-x64.zip

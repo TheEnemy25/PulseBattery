@@ -69,8 +69,10 @@ public partial class App : Application
                 _activationWait = ThreadPool.RegisterWaitForSingleObject(_activation, (_, _) => Dispatcher.BeginInvoke(ShowDashboard), null, Timeout.Infinite, false);
             }
             var monitor = BatteryMonitorFactory.CreateDefault();
-            _viewModel = new(monitor, new JsonSettingsStore(), _lifetime.Token,
-                verification ? null : new WindowsStartupRegistration(Environment.ProcessPath!));
+            var settingsStore = new JsonSettingsStore();
+            var startup = verification ? null : new WindowsStartupRegistration(Environment.ProcessPath!);
+            startup?.ApplyInstallerPreference(settingsStore);
+            _viewModel = new(monitor, settingsStore, _lifetime.Token, startup);
             if (e.Args.Contains("--autostart") && _viewModel.Settings.StartWithWindows != true) { IsExiting = true; Shutdown(); return; }
             if (smokeTest)
             {

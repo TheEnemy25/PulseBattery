@@ -18,6 +18,8 @@ public static class DeviceClassification
     {
         var major = (bluetoothClass >> 8) & 0x1F;
         if (major == 2) return DeviceKind.Other; // A phone is not an audio accessory.
+        var audioRole = (bluetoothClass >> 2) & 0x3F;
+        if (major == 4 && audioRole is not (0 or 1 or 2 or 6)) return DeviceKind.Other;
         if (major == 5)
         {
             if (((bluetoothClass >> 2) & 0x0F) is 1 or 2) return DeviceKind.Gamepad;
@@ -31,7 +33,7 @@ public static class DeviceClassification
         return DeviceKind.Other;
     }
 
-    public static DeviceKind FromHid(string name, ushort usagePage, ushort usage) => usagePage == 1
+    public static DeviceKind FromHid(string name, ushort usagePage, ushort usage) => usagePage == 0x0B && usage == 5 ? DeviceKind.Headset : usagePage == 1
         ? usage switch { 2 => DeviceKind.Mouse, 4 or 5 => DeviceKind.Gamepad, 6 => DeviceKind.Keyboard, _ => FromName(name) }
         : FromName(name);
 }

@@ -1,12 +1,13 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Text;
+using PulseBattery.Infrastructure.Bluetooth;
 
 namespace PulseBattery.Infrastructure.Hid;
 
 public sealed record HidDeviceInfo(string Path, ushort VendorId, ushort ProductId, string ProductName,
     ushort UsagePage, ushort Usage, ushort InputLength, ushort OutputLength, byte[] OutputReportIds,
-    ushort FeatureLength = 0, IReadOnlyList<HidBatteryValue>? BatteryValues = null);
+    ushort FeatureLength = 0, IReadOnlyList<HidBatteryValue>? BatteryValues = null, string? ContainerId = null);
 
 public sealed record HidBatteryValue(int ReportType, byte ReportId, ushort UsagePage, ushort Usage, ushort LinkCollection, int LogicalMin, int LogicalMax, int PhysicalMin, int PhysicalMax);
 
@@ -34,7 +35,9 @@ public sealed class HidDeviceCatalog
                 try
                 {
                     Marshal.WriteInt32(detail, IntPtr.Size == 8 ? 8 : 6);
-                    if (!NativeMethods.SetupDiGetDeviceInterfaceDetailW(set, ref data, detail, size, out _, 0)) continue;
+                    var info = new NativeMethods.DeviceInfo { Size = Marshal.SizeOf<NativeMethods.DeviceInfo>() };
+                    if (!NativeMethods.SetupDiGetDeviceInterfaceDetailW(set, ref data, detail, size, out _, ref info)) continue;
+                    var node = WindowsDeviceCatalog.ReadNode(set, ref info);
                     var path = Marshal.PtrToStringUni(detail + 4)!;
                     using var handle = NativeMethods.CreateFileW(path, 0, 3, 0, 3, 0, 0);
                     if (handle.IsInvalid) continue;
@@ -50,9 +53,9 @@ public sealed class HidDeviceCatalog
                         ReadReportIds(parsed, caps.OutputValues, false, reportIds);
                         ReadReportIds(parsed, caps.OutputButtons, true, reportIds);
                         devices.Add(new(path, attributes.VendorId, attributes.ProductId,
-                            Encoding.Unicode.GetString(name).TrimEnd('\0'), caps.UsagePage, caps.Usage,
+                            string.IsNullOrWhiteSpace(Encoding.Unicode.GetString(name).TrimEnd('\0')) ? node?.Name ?? "" : Encoding.Unicode.GetString(name).TrimEnd('\0'), caps.UsagePage, caps.Usage,
                             caps.InputLength, caps.OutputLength, reportIds.ToArray(), caps.FeatureLength,
-                            ReadBatteryValues(parsed, 0, caps.InputValues).Concat(ReadBatteryValues(parsed, 2, caps.FeatureValues)).ToArray()));
+                            ReadBatteryValues(parsed, 0, caps.InputValues).Concat(ReadBatteryValues(parsed, 2, caps.FeatureValues)).ToArray(), node?.ContainerId));
                     }
                     finally { NativeMethods.HidD_FreePreparsedData(parsed); }
                 }
@@ -83,7 +86,7 @@ public sealed class HidDeviceCatalog
             var page = BitConverter.ToUInt16(bytes, offset);
             var min = BitConverter.ToUInt16(bytes, offset + 56);
             var max = bytes[offset + 12] != 0 ? BitConverter.ToUInt16(bytes, offset + 58) : min;
-            foreach (var usage in page == 6 ? new ushort[] { 0x20 } : page == 0x85 ? new ushort[] { 0x64, 0x44 } : [])
+            foreach (var usage in page == 6 ? new ushort[] { 0x20 } : page == 0x85 ? new ushort[] { 0x64, 0x65, 0x44 } : [])
                 if (usage >= min && usage <= max)
                     values.Add(new(reportType, bytes[offset + 2], page, usage, BitConverter.ToUInt16(bytes, offset + 6),
                         BitConverter.ToInt32(bytes, offset + 40), BitConverter.ToInt32(bytes, offset + 44),

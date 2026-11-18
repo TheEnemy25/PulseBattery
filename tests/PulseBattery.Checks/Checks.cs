@@ -31,6 +31,29 @@ internal static class CheckRunner
 
     private static async Task ExecuteAsync(string[] args)
     {
+        if (args.FirstOrDefault() == "--installer-startup")
+        {
+            if (args.Length != 4) throw new ArgumentException("Expected executable, isolated settings path and startup choice.");
+            var expected = bool.Parse(args[3]);
+            var store = new JsonSettingsStore(args[2]);
+            store.Save(new AppSettings { StartWithWindows = !expected, Language = "en", RefreshSeconds = 75 });
+            var registration = new WindowsStartupRegistration(args[1]);
+            try
+            {
+                registration.ApplyInstallerPreference(new RejectingSettingsStore(store));
+                throw new InvalidOperationException("The installer preference was missing or its save failure was ignored.");
+            }
+            catch (IOException) { }
+            registration.ApplyInstallerPreference(store);
+            if (store.Load() is not { Language: "en", RefreshSeconds: 75 } || store.Load().StartWithWindows != expected)
+                throw new InvalidOperationException("The installer choice was not saved while preserving other preferences.");
+            store.Save(store.Load() with { StartWithWindows = !expected });
+            registration.ApplyInstallerPreference(store);
+            if (store.Load().StartWithWindows != !expected)
+                throw new InvalidOperationException("An already consumed installer choice overrode a later user preference.");
+            Console.WriteLine($"PASS: Installer startup choice {expected} is saved once, survives failed saves and preserves other settings.");
+            return;
+        }
         if (args.Contains("--windows"))
         {
             var catalog = new WindowsDeviceCatalog();
@@ -175,8 +198,86 @@ internal static class CheckRunner
         var hidCapability = new HidBatteryValue(2, 1, 6, 0x20, 0, 0, 100, 0, 0);
         Check(StandardHidBatteryProvider.Normalize(64, hidCapability) == 64, "Standard HID percent is accepted without a vendor protocol");
         Check(StandardHidBatteryProvider.Normalize(255, hidCapability) is null, "HID values outside the declared range are rejected");
-        Check(StandardHidBatteryProvider.Normalize(20, hidCapability with { LogicalMax = 255 }) is null, "Undocumented HID units do not invent a percentage");
+        Check(StandardHidBatteryProvider.Normalize(20, hidCapability with { UsagePage = 0xFF00, Usage = 1, LogicalMax = 255 }) is null, "Undocumented HID units do not invent a percentage");
         Check(StandardHidBatteryProvider.Normalize(128, hidCapability with { LogicalMax = 255, PhysicalMax = 100 }) == 50, "HID scaling follows an explicit percent physical range");
+        Check(StandardHidBatteryProvider.Normalize(128, hidCapability with { LogicalMax = 255 }) == 50 &&
+            StandardHidBatteryProvider.Normalize(255, hidCapability with { LogicalMax = 255 }) == 100,
+            "Standard HID Battery Strength scales its declared logical range without a vendor whitelist");
+        Check(StandardHidBatteryProvider.Normalize(255, hidCapability with { LogicalMax = 254 }) is null, "A HID null sentinel outside the declared range is not full charge");
+        var arbitraryMouse = new HidDeviceInfo("hid:mouse:main", 0x1234, 0x5678, "M42", 1, 2, 8, 0, [], ContainerId: "port:a");
+        var arbitraryKeyboard = arbitraryMouse with { Path = "hid:keyboard", ProductName = "K9", Usage = 6 };
+        var inputCandidates = StandardHidBatteryProvider.DiscoverDevices([arbitraryMouse, arbitraryKeyboard]);
+        Check(inputCandidates.Count == 2 && inputCandidates.Any(d => d.Kind == DeviceKind.Mouse) && inputCandidates.Any(d => d.Kind == DeviceKind.Keyboard), "Input role metadata does not depend on device model names");
+        var batteryCollection = arbitraryMouse with { Path = "hid:mouse:battery", UsagePage = 0xFF00, Usage = 1, BatteryValues = [hidCapability] };
+        var mouseCollections = StandardHidBatteryProvider.DiscoverDevices([arbitraryMouse, batteryCollection]);
+        Check(mouseCollections is [{ Kind: DeviceKind.Mouse }] && mouseCollections[0].Device.Path == batteryCollection.Path, "A separate battery collection joins its physical mouse without duplicate HID cards");
+        Check(StandardHidBatteryProvider.DiscoverDevices([arbitraryMouse, arbitraryMouse with { Path = "hid:mouse:two", ContainerId = "port:b" }]).Count == 2, "Two identical named mice on different receivers remain separate");
+        Check(StandardHidBatteryProvider.DiscoverDevices([arbitraryMouse with { UsagePage = 0x0B, Usage = 5 }]) is [{ Kind: DeviceKind.Headset }], "Standard HID headset usage does not need a model entry");
+        var classMouse = new WindowsDeviceNode("HID\\VID_1234", "M42", "Mouse", "port:a", null, null);
+        var classKeyboard = classMouse with { Id = "HID\\VID_1234&MI_01", ClassName = "Keyboard", Name = "K9" };
+        Check(WindowsBatteryProvider.MapDevices([classMouse, classKeyboard], []).Count == 2, "Windows fallback retains both input roles when HID access is unavailable");
+        var classBluetoothMouse = btRoot with { Name = "M42" };
+        Check(WindowsBatteryProvider.MapDevices([classBluetoothMouse, classMouse with { ContainerId = btRoot.ContainerId }], []) is [{ Kind: DeviceKind.Mouse }], "Windows mouse class identifies an opaque Bluetooth model even without classic Bluetooth metadata");
+        Check(WindowsBatteryProvider.MapDevices([classMouse with { ClassName = "MEDIA", Name = "A42" }], []) is [{ Kind: DeviceKind.Headset, BatterySupported: false }], "A USB audio class is metadata, not proof of a battery");
+        var partialWindows = WindowsBatteryProvider.ReadSources(() => [btRoot, btBatteryProfile], () => throw new System.ComponentModel.Win32Exception(6));
+        Check(partialWindows is [{ BatteryPercent: 72 }], "A failed classic Bluetooth handle cannot discard Windows battery readings");
+        var partialBluetooth = WindowsBatteryProvider.ReadSources(() => throw new System.ComponentModel.Win32Exception(6), () => [btPeer]);
+        Check(partialBluetooth.Count == 1 && partialBluetooth[0].Name == btPeer.Name, "A failed Windows catalog cannot discard connected Bluetooth peers");
+        var bothFailed = false;
+        try { WindowsBatteryProvider.ReadSources(() => throw new System.ComponentModel.Win32Exception(6), () => throw new System.ComponentModel.Win32Exception(6)); }
+        catch (AggregateException) { bothFailed = true; }
+        Check(bothFailed, "A complete Windows discovery failure is reported instead of silently hiding it");
+        var genericMouse = device with { Id = "hid-battery:port:a:Mouse", Name = "M42", Source = "HID battery", PhysicalId = "port:a", BatteryPercent = null, State = ReadingState.Unavailable };
+        var windowsMouse = genericMouse with { Id = "windows:port:a", Kind = DeviceKind.Other, Source = "Windows battery", BatteryPercent = 58, State = ReadingState.Available };
+        Check(DeviceReconciliation.MergeTransports([genericMouse, windowsMouse]) is [{ Kind: DeviceKind.Mouse, BatteryPercent: 58, Id: "hid-battery:port:a:Mouse" }], "Windows and HID readings for one physical input use one stable card with a real percentage");
+        Check(DeviceReconciliation.MergeTransports([genericMouse, windowsMouse with { PhysicalId = "port:b", Kind = DeviceKind.Mouse }]).Count == 2, "Physical reconciliation does not collapse independent same-name mice");
+        var vendorMouse = genericMouse with { Id = "hidpp:stable", Source = "HID++", BatteryPercent = 77, State = ReadingState.Available };
+        Check(DeviceReconciliation.MergeTransports([genericMouse, vendorMouse]) is [{ Id: "hidpp:stable", BatteryPercent: 77 }], "Adding generic discovery preserves the existing vendor device identity and charge");
+        Check(BluetoothGattBatteryProvider.ParseBatteryLevel([0]) == 0 && BluetoothGattBatteryProvider.ParseBatteryLevel([100]) == 100, "Bluetooth LE Battery Level accepts the defined percentage range");
+        Check(BluetoothGattBatteryProvider.ParseBatteryLevel([255]) is null && BluetoothGattBatteryProvider.ParseBatteryLevel([]) is null && BluetoothGattBatteryProvider.ParseBatteryLevel([20, 30]) is null, "Malformed BLE battery data never invents a percentage");
+        Check(XInputBatteryProvider.MapBattery(0, 0, 0) is null && XInputBatteryProvider.MapBattery(0, 1, 3) is null, "Disconnected and wired XInput controllers do not pretend to have battery charge");
+        var xinputLow = XInputBatteryProvider.MapBattery(0, 2, 1)!;
+        Check(xinputLow is { BatteryPercent: null, ChargeLevel: BatteryChargeLevel.Low, State: ReadingState.Available } && xinputLow.IsLow(15), "XInput low battery is a reported level, not an invented exact percentage");
+        Check(XInputBatteryProvider.MapBattery(0, 0xFF, 3) is { State: ReadingState.Unavailable, ChargeLevel: null }, "XInput unknown battery type cannot report a trustworthy level");
+        var controllerFallback = genericMouse with { Id = "hid:controller", Kind = DeviceKind.Gamepad, UsesXInput = true };
+        Check(DeviceReconciliation.MergeTransports([controllerFallback, xinputLow]) is [{ Id: "hid:controller", ChargeLevel: BatteryChargeLevel.Low }], "A single identified XInput HID controller uses one stable card");
+        Check(DeviceReconciliation.MergeTransports([controllerFallback with { UsesXInput = false }, xinputLow]).Count == 2, "A PlayStation or other non-XInput controller is not guessed to be an Xbox slot");
+        var coarseProvider = new FakeProvider([xinputLow]);
+        var coarseMonitor = new BatteryMonitor([coarseProvider]);
+        Check((await coarseMonitor.ScanAsync(default)).Devices is [{ State: ReadingState.Available, BatteryPercent: null, ChargeLevel: BatteryChargeLevel.Low }], "The monitor retains valid coarse battery levels");
+        coarseProvider.Devices = [xinputLow with { State = ReadingState.Unavailable, ChargeLevel = null }];
+        Check((await coarseMonitor.ScanAsync(default)).Devices is [{ State: ReadingState.Stale, ChargeLevel: BatteryChargeLevel.Low }], "A last known controller level is marked stale after its read fails");
+        Check(!StandardHidBatteryProvider.HasBatteryCapability(arbitraryMouse) && !StandardHidBatteryProvider.HasBatteryCapability(arbitraryKeyboard), "A mouse or keyboard HID role alone does not imply battery power");
+        Check(StandardHidBatteryProvider.HasBatteryCapability(batteryCollection), "A declared HID battery capability confirms battery support independently of vendor");
+        var absoluteCharge = hidCapability with { UsagePage = 0x85, Usage = 0x65 };
+        Check(StandardHidBatteryProvider.HasBatteryCapability(arbitraryKeyboard with { BatteryValues = [absoluteCharge] }) &&
+            StandardHidBatteryProvider.Normalize(62, absoluteCharge) == 62, "Standard Absolute State of Charge extends battery support without adding model exceptions");
+        Check(!StandardHidBatteryProvider.HasBatteryCapability(arbitraryMouse with { BatteryValues = [hidCapability with { UsagePage = 0xFF00, Usage = 1 }] }), "An arbitrary vendor HID value is not proof of a battery");
+        var peripheralKinds = new[] { DeviceKind.Mouse, DeviceKind.Keyboard, DeviceKind.Headset, DeviceKind.Headphones, DeviceKind.Earbuds, DeviceKind.Gamepad };
+        var usbOnly = peripheralKinds.Select((kind, index) => new BatteryDevice("usb-only:" + index, "USB peripheral " + index, kind, null, null,
+            ReadingState.Unavailable, "HID battery", "No battery capability")).ToArray();
+        Check((await new BatteryMonitor([new FakeProvider(usbOnly)]).ScanAsync(default)).Devices.Count == 0, "Ordinary USB mice, keyboards, audio devices and wired controllers are not shown as batteries");
+        var windowsUsbOnly = WindowsBatteryProvider.MapDevices([classMouse, classKeyboard, classMouse with { Id = "USB\\AUDIO", ContainerId = "port:audio", ClassName = "MEDIA" }], []);
+        Check((await new BatteryMonitor([new FakeProvider(windowsUsbOnly)]).ScanAsync(default)).Devices.Count == 0, "Windows input and audio metadata cannot create non-battery cards");
+        var declaredBatteryInputs = usbOnly.Select(d => d with { BatterySupported = true }).ToArray();
+        var declaredResult = await new BatteryMonitor([new FakeProvider(declaredBatteryInputs)]).ScanAsync(default);
+        Check(declaredResult.Devices.Count == peripheralKinds.Length && declaredResult.Devices.All(d => d.State == ReadingState.Unavailable && d.BatteryPercent is null), "Confirmed battery peripherals stay visible when their current percentage is unavailable");
+        var chargingUsbMouse = usbOnly[0] with { BatteryPercent = 45, State = ReadingState.Available, IsCharging = true };
+        Check((await new BatteryMonitor([new FakeProvider([chargingUsbMouse])]).ScanAsync(default)).Devices is [{ BatteryPercent: 45, IsCharging: true }], "A battery mouse charging through a USB cable remains visible");
+        var batteryCollectionReading = genericMouse with { Kind = DeviceKind.Other, BatterySupported = true };
+        var mouseRoleMetadata = genericMouse with { Id = "windows:mouse-role", Source = "Windows battery", BatterySupported = false };
+        Check((await new BatteryMonitor([new FakeProvider([batteryCollectionReading, mouseRoleMetadata])]).ScanAsync(default)).Devices is [{ Kind: DeviceKind.Mouse, BatterySupported: true }], "Battery evidence and peripheral role are combined before filtering");
+        var realBatteryMouse = vendorMouse with { BatterySupported = true };
+        var receiverKeyboardFunction = genericMouse with { Id = "receiver:keyboard-function", Kind = DeviceKind.Keyboard };
+        Check((await new BatteryMonitor([new FakeProvider([realBatteryMouse, receiverKeyboardFunction])]).ScanAsync(default)).Devices is [{ Kind: DeviceKind.Mouse }], "A receiver's auxiliary keyboard function does not become another battery device");
+        var fakeWirelessName = usbOnly[0] with { Name = "Wireless gaming mouse", Source = "HID++" };
+        Check((await new BatteryMonitor([new FakeProvider([fakeWirelessName])]).ScanAsync(default)).Devices.Count == 0, "A wireless-sounding name or provider label alone cannot establish battery support");
+        Check((await new BatteryMonitor([new FakeProvider([noBattery[0]])]).ScanAsync(default)).Devices is [{ BatterySupported: true }], "Connected Bluetooth earbuds remain supported without a currently available percentage");
+        Check((await new BatteryMonitor([new FakeProvider([XInputBatteryProvider.MapBattery(0, 0xFF, 3)!])]).ScanAsync(default)).Devices.Count == 0, "An unknown XInput battery type without other evidence is hidden");
+        Check((await new BatteryMonitor([new FakeProvider([XInputBatteryProvider.MapBattery(0, 2, 255)!])]).ScanAsync(default)).Devices is [{ State: ReadingState.Unavailable, BatterySupported: true }], "A confirmed controller battery is retained even if its level is unknown");
+        Check(DeviceClassification.FromName("Wireless audio", 0x240414) == DeviceKind.Other && DeviceClassification.FromName("Wireless display", 0x24043C) == DeviceKind.Other, "Bluetooth speakers and televisions are not classified as headphones");
+        var otherBattery = device with { Id = "other:battery", Kind = DeviceKind.Other, BatterySupported = true };
+        Check((await new BatteryMonitor([new FakeProvider([otherBattery])]).ScanAsync(default)).Devices.Count == 0, "Out-of-scope battery hardware does not enter the peripheral list");
         var orderedDevices = new[] { device with { Id = "order:a" }, device with { Id = "order:b" }, device with { Id = "order:c" } };
         Check(DeviceOrdering.Apply(orderedDevices, ["order:c", "order:a"]).Select(d => d.Id).SequenceEqual(["order:c", "order:a", "order:b"]), "Saved order takes priority and new devices append");
         Check(DeviceOrdering.Apply(orderedDevices.Reverse(), []).Select(d => d.Id).SequenceEqual(["order:c", "order:b", "order:a"]), "Without a saved order the existing scan order is preserved");
@@ -272,6 +373,12 @@ sealed class FakeProvider(IReadOnlyList<BatteryDevice> devices) : IBatteryProvid
     public IReadOnlyList<BatteryDevice> Devices { get; set; } = devices;
     public Task<IReadOnlyList<BatteryDevice>> GetDevicesAsync(CancellationToken cancellationToken) => Task.FromResult(Devices);
 }
+sealed class RejectingSettingsStore(ISettingsStore inner) : ISettingsStore
+{
+    public AppSettings Load() => inner.Load();
+    public void Save(AppSettings settings) => throw new IOException("Simulated settings save failure.");
+}
+
 sealed class BrokenProvider : IBatteryProvider
 {
     public Task<IReadOnlyList<BatteryDevice>> GetDevicesAsync(CancellationToken cancellationToken) => throw new IOException("Simulated failure");

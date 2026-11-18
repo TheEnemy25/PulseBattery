@@ -13,8 +13,10 @@ public static class BatteryMonitorFactory
         return new BatteryMonitor([
             new LogitechBatteryProvider(hid, trace),
             new HyperXBatteryProvider(hid),
-            new WindowsBatteryProvider(new WindowsDeviceCatalog(), new ClassicBluetoothCatalog()),
-            new StandardHidBatteryProvider(hid)
+            new WindowsBatteryProvider(new WindowsDeviceCatalog(), new ClassicBluetoothCatalog(), trace),
+            new StandardHidBatteryProvider(hid),
+            new BluetoothGattBatteryProvider(new WindowsDeviceCatalog(), trace),
+            new XInputBatteryProvider()
         ]);
     }
 }

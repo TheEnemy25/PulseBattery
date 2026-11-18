@@ -57,7 +57,7 @@ public sealed class HyperXBatteryProvider(HidDeviceCatalog catalog) : IBatteryPr
                     charging = chargeValue is 0 or 1 ? chargeValue == 1 : null;
                 }
                 results.Add(new($"hyperx:{group.Key}", "HyperX Cloud III S Wireless", DeviceKind.Headset, level, charging,
-                    level is null ? ReadingState.Unavailable : ReadingState.Available, "HyperX HID", level is null ? "Увімкни навушники. Приймач знайдено, відповіді про заряд поки немає." : "2.4 ГГц · USB-приймач"));
+                    level is null ? ReadingState.Unavailable : ReadingState.Available, "HyperX HID", level is null ? "Увімкни навушники. Приймач знайдено, відповіді про заряд поки немає." : "2.4 ГГц · USB-приймач") { PhysicalId = group.First().ContainerId, BatterySupported = true });
             }
             finally { foreach (var connection in connections) connection.Dispose(); }
         }
