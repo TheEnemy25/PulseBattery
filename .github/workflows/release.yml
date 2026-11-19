@@ -43,7 +43,7 @@ jobs:
           $existing = gh release view $tag --repo $env:GITHUB_REPOSITORY --json isDraft,assets 2>$null
           if ($LASTEXITCODE -eq 0) {
             $release = $existing | ConvertFrom-Json
-            $required = @('PulseBattery.exe', 'PulseBattery-Setup.exe', 'PulseBattery-Portable-win-x64.zip', 'SHA256SUMS.txt')
+            $required = @('PulseBattery.exe', 'PulseBattery-Setup.exe', 'PulseBattery-Portable-win-x64.zip', 'PulseBattery-DeviceBackend-Sources.zip', 'SHA256SUMS.txt')
             if ($release.isDraft -or @($required | Where-Object { $_ -notin $release.assets.name }).Count -ne 0) {
               throw 'An incomplete release already exists. Finish or remove that draft before retrying.'
             }
@@ -75,6 +75,7 @@ jobs:
             '- PulseBattery-Setup.exe: installer with folder selection and Windows uninstall support.',
             '- PulseBattery-Portable-win-x64.zip: extract and run without installation.',
             '- PulseBattery.exe: standalone portable executable.',
+            '- PulseBattery-DeviceBackend-Sources.zip: complete GPL device backend and HeadsetControl source.',
             '- SHA256SUMS.txt: download checksums.',
             '',
             'This build is unsigned. Windows Smart App Control may block it.'
@@ -85,6 +86,7 @@ jobs:
             artifacts/release/PulseBattery-Setup.exe `
             artifacts/release/PulseBattery-Portable-win-x64.zip `
             artifacts/release/PulseBattery.exe `
+            artifacts/release/PulseBattery-DeviceBackend-Sources.zip `
             artifacts/release/SHA256SUMS.txt `
             --repo $env:GITHUB_REPOSITORY --target $env:GITHUB_SHA `
             --title "Pulse Battery $($env:RELEASE_TAG)" --notes-file $notesFile --generate-notes --latest

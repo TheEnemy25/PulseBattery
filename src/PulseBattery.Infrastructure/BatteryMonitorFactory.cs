@@ -11,12 +11,10 @@ public static class BatteryMonitorFactory
     {
         var hid = new HidDeviceCatalog();
         return new BatteryMonitor([
-            new LogitechBatteryProvider(hid, trace),
-            new HyperXBatteryProvider(hid),
+            new VendorBatteryProvider(hid, trace),
             new WindowsBatteryProvider(new WindowsDeviceCatalog(), new ClassicBluetoothCatalog(), trace),
             new StandardHidBatteryProvider(hid),
-            new BluetoothGattBatteryProvider(new WindowsDeviceCatalog(), trace),
-            new XInputBatteryProvider()
+            new BluetoothGattBatteryProvider(new WindowsDeviceCatalog(), trace)
         ]);
     }
 }

@@ -12,7 +12,7 @@
   #define AppMutex "Local\PulseBattery.Instance"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.3"
+  #define AppVersion "0.1.4"
 #endif
 #ifndef AppSource
   #define AppSource "..\artifacts\portable\win-x64\PulseBattery.exe"
@@ -87,6 +87,9 @@ Name: "{autodesktop}\{#AppName}"; Filename: "{app}\PulseBattery.exe"; Parameters
 
 [Run]
 Filename: "{app}\PulseBattery.exe"; Parameters: "--dashboard"; Flags: nowait skipifsilent; Check: LaunchEnabled
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{localappdata}\PulseBattery\DeviceBackend"
 
 [Code]
 var

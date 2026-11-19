@@ -105,6 +105,7 @@ internal static class CheckRunner
             Console.WriteLine("PASS: " + label);
             count++;
         }
+        await VendorBackendChecks.RunAsync(Check);
         Check(BatteryReports.HyperXLevel([12, 2, 3, 1, 0, 6, 0], 6) == 0, "HyperX zero is valid");
         Check(BatteryReports.HyperXLevel([12, 2, 3, 1, 0, 6, 100], 6) == 100, "HyperX full battery");
         Check(BatteryReports.HyperXLevel([12, 2, 3, 1, 0, 6, 255], 6) is null, "HyperX sentinel rejected");

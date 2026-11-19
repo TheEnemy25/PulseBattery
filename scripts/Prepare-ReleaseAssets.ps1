@@ -28,7 +28,9 @@ finally { $archive.Dispose() }
 
 $outputFolder = Join-Path $workspace 'artifacts/release'
 New-Item -ItemType Directory -Path $outputFolder -Force | Out-Null
-$files = @($executable, $installer, $portableZip)
+$backendSource = Join-Path $workspace 'artifacts/device-backend/PulseBattery-DeviceBackend-Sources.zip'
+if (-not (Test-Path -LiteralPath $backendSource)) { throw 'The corresponding source archive for the device backend is missing.' }
+$files = @($executable, $installer, $portableZip, $backendSource)
 foreach ($path in $files) { Copy-Item -LiteralPath $path -Destination (Join-Path $outputFolder ([IO.Path]::GetFileName($path))) -Force }
 $hashes = foreach ($path in $files) {
     $name = [IO.Path]::GetFileName($path)
