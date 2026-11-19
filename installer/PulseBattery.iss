@@ -12,7 +12,7 @@
   #define AppMutex "Local\PulseBattery.Instance"
 #endif
 #ifndef AppVersion
-  #define AppVersion "0.1.4"
+  #define AppVersion "0.1.5"
 #endif
 #ifndef AppSource
   #define AppSource "..\artifacts\portable\win-x64\PulseBattery.exe"

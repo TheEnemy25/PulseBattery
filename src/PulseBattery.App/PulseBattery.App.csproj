@@ -9,7 +9,7 @@
     <UseWindowsForms>true</UseWindowsForms>
     <ImplicitUsings>disable</ImplicitUsings>
     <AssemblyName>PulseBattery</AssemblyName>
-    <Version>0.1.4</Version>
+    <Version>0.1.5</Version>
     <ApplicationIcon>Assets/Pulse.ico</ApplicationIcon>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <TieredCompilation>false</TieredCompilation>
